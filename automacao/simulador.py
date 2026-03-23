@@ -44,6 +44,24 @@ def gerar_email(nome: str) -> str:
     return remover_acentos(f"{primeiro}{sobrenome}@gmail.com")
 
 
+def formatar_telefone(tel: str) -> str:
+    """Garante que o telefone tenha 11 dígitos (DDD + 9 + 8 dígitos)."""
+    num = re.sub(r"\D", "", tel)
+    if not num:
+        return "11999999999"  # fallback
+    # Se tem 10 dígitos, adiciona 9 após o DDD
+    if len(num) == 10:
+        num = num[:2] + "9" + num[2:]
+    # Se tem menos de 10, gera um válido com o DDD
+    if len(num) < 10:
+        ddd = num[:2] if len(num) >= 2 else "11"
+        num = ddd + "9" + "9" * 8
+    # Se tem mais de 11, corta
+    if len(num) > 11:
+        num = num[:11]
+    return num
+
+
 async def preencher_combobox(page, index, texto):
     """Preenche um ng-select combobox pelo índice na página."""
     # Clica no ng-select para abrir
@@ -105,8 +123,8 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         await input_email.type(email, delay=30)
         await page.wait_for_timeout(500)
 
-        # Celular
-        telefone = cliente.get("telefone", "")
+        # Celular (garantir 11 dígitos)
+        telefone = formatar_telefone(cliente.get("telefone", ""))
         input_cel = page.locator('input[formcontrolname="cellNumber"]')
         await input_cel.click()
         await input_cel.type(telefone, delay=30)
@@ -125,6 +143,36 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         print(f"  [4/8] Clicando em Quero simular...")
         await page.locator("button.btn-simulate").click()
         await page.wait_for_timeout(4000)
+
+        # 4.5 Capturar Pré-Aprovado (se existir)
+        pre_aprovado = ""
+        pre_aprovado_valor = 0.0
+        pre_aprovado_entrada_min = 0
+        pre_aprovado_prazo_max = 0
+        try:
+            advice_el = page.locator("p.advice")
+            if await advice_el.is_visible(timeout=3000):
+                pre_aprovado = await advice_el.inner_text()
+                pre_aprovado = pre_aprovado.replace("\xa0", " ").strip()
+                print(f"  [PRÉ-APROVADO] {pre_aprovado}")
+
+                # Extrair valor pré-aprovado (ex: "R$ 150.000,00")
+                valor_match = re.search(r"R\$\s*([\d.,]+)", pre_aprovado)
+                if valor_match:
+                    v = valor_match.group(1).replace(".", "").replace(",", ".")
+                    pre_aprovado_valor = float(v)
+
+                # Extrair entrada mínima (ex: "30%")
+                entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", pre_aprovado)
+                if entrada_match:
+                    pre_aprovado_entrada_min = int(entrada_match.group(1))
+
+                # Extrair prazo máximo (ex: "48 meses")
+                prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", pre_aprovado)
+                if prazo_match:
+                    pre_aprovado_prazo_max = int(prazo_match.group(1))
+        except:
+            pass
 
         # 5. Clicar em "Carro"
         print(f"  [5/8] Escolhendo Carro...")
@@ -157,11 +205,16 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         await preencher_combobox(page, 3, uf_nome)
         print(f"    UF: {uf_nome}")
 
-        # Valor do veículo
+        # Valor do veículo (campo com máscara monetária - digitar centavos)
         input_valor = page.locator("input#valor-veiculo")
         await input_valor.click()
         await input_valor.fill("")
-        await input_valor.type("200000", delay=50)
+        # Limpar campo completamente
+        await input_valor.press("Control+a")
+        await input_valor.press("Backspace")
+        await page.wait_for_timeout(300)
+        # Digitar 20000000 = R$ 200.000,00 (valor em centavos)
+        await input_valor.type("20000000", delay=30)
         await page.wait_for_timeout(1000)
         print(f"    Valor: R$ 200.000,00")
 
@@ -231,6 +284,8 @@ async def simular_financiamento(page, cliente: dict) -> dict:
 
         print(f"  [RESULT] Entrada: {entrada_pct}% = R$ {entrada_valor:,.2f}")
         print(f"  [RESULT] Parcela: R$ {parcela_valor:,.2f} x {parcela_qtd}")
+        if pre_aprovado_valor > 0:
+            print(f"  [RESULT] Pré-aprovado: R$ {pre_aprovado_valor:,.2f} | Entrada mín: {pre_aprovado_entrada_min}% | Prazo máx: {pre_aprovado_prazo_max} meses")
 
         await page.screenshot(path=f"resultado_{cliente['cpf']}.png")
 
@@ -240,6 +295,10 @@ async def simular_financiamento(page, cliente: dict) -> dict:
             "entrada_percentual": round(entrada_pct, 2),
             "parcela_valor": round(parcela_valor, 2),
             "parcela_qtd": parcela_qtd,
+            "pre_aprovado_valor": round(pre_aprovado_valor, 2),
+            "pre_aprovado_entrada_min": pre_aprovado_entrada_min,
+            "pre_aprovado_prazo_max": pre_aprovado_prazo_max,
+            "pre_aprovado_texto": pre_aprovado,
             "bloqueado": False,
         }
 

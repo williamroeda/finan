@@ -35,17 +35,25 @@ export async function POST(request) {
         const entradaPct = parseFloat(r.entrada_percentual) || (entradaValor / 200000) * 100;
         const classificacao = classificar(entradaPct);
 
+        const updateData = {
+          status: "CONCLUIDO",
+          entrada_valor: entradaValor,
+          entrada_percentual: Math.round(entradaPct * 100) / 100,
+          parcela_valor: parseFloat(r.parcela_valor) || 0,
+          parcela_qtd: parseInt(r.parcela_qtd) || 0,
+          classificacao,
+          concluido_em: new Date().toISOString(),
+        };
+
+        // Pré-aprovado (se existir)
+        if (r.pre_aprovado_valor) updateData.pre_aprovado_valor = parseFloat(r.pre_aprovado_valor);
+        if (r.pre_aprovado_entrada_min) updateData.pre_aprovado_entrada_min = parseInt(r.pre_aprovado_entrada_min);
+        if (r.pre_aprovado_prazo_max) updateData.pre_aprovado_prazo_max = parseInt(r.pre_aprovado_prazo_max);
+        if (r.pre_aprovado_texto) updateData.pre_aprovado_texto = r.pre_aprovado_texto;
+
         await supabase
           .from("simulacoes")
-          .update({
-            status: "CONCLUIDO",
-            entrada_valor: entradaValor,
-            entrada_percentual: Math.round(entradaPct * 100) / 100,
-            parcela_valor: parseFloat(r.parcela_valor) || 0,
-            parcela_qtd: parseInt(r.parcela_qtd) || 0,
-            classificacao,
-            concluido_em: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq("cpf", cpf);
         atualizados++;
       }
