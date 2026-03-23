@@ -1,20 +1,15 @@
 """
 Simulador Santander Financiamentos - Automação com Playwright
-Recebe JSON exportado do dashboard, simula no Santander,
-e gera arquivo de resultado para importar de volta.
+Seletores reais do site do Santander (Março 2026)
 """
 
 import asyncio
 import json
-import os
 import re
 import sys
 import unicodedata
 import argparse
-from dotenv import load_dotenv
 from playwright.async_api import async_playwright
-
-load_dotenv()
 
 VEICULO = {
     "marca": "GM - CHEVROLET",
@@ -23,7 +18,18 @@ VEICULO = {
     "valor": "200000",
 }
 
-SITE_URL = "https://cliente.santanderfinanciamentos.com.br/originacaocliente/?int_source=portalSF&int_medium=c2c&int_campaign=simular-agora&mathts=nonpaid#/dados-pessoais"
+SITE_URL = "https://www.cliente.santanderfinanciamentos.com.br/originacaocliente/?ori=SF&int_source=menu-simule-ja#/dados-pessoais"
+
+# Mapa UF sigla -> nome completo (para o select do site)
+UF_NOME = {
+    "AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas",
+    "BA": "Bahia", "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo",
+    "GO": "Goiás", "MA": "Maranhão", "MT": "Mato Grosso", "MS": "Mato Grosso do Sul",
+    "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná",
+    "PE": "Pernambuco", "PI": "Piauí", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
+    "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima", "SC": "Santa Catarina",
+    "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins",
+}
 
 
 def remover_acentos(texto: str) -> str:
@@ -38,149 +44,195 @@ def gerar_email(nome: str) -> str:
     return remover_acentos(f"{primeiro}{sobrenome}@gmail.com")
 
 
-async def simular_financiamento(page, cliente: dict) -> dict | None:
+async def preencher_combobox(page, index, texto):
+    """Preenche um ng-select combobox pelo índice na página."""
+    # Clica no ng-select para abrir
+    ng_selects = page.locator("ng-select")
+    await ng_selects.nth(index).click()
+    await page.wait_for_timeout(500)
+
+    # Digita no input do combobox
+    input_combo = ng_selects.nth(index).locator("input[role='combobox']")
+    await input_combo.fill("")
+    await input_combo.type(texto, delay=50)
+    await page.wait_for_timeout(1500)
+
+    # Clica na primeira opção do dropdown
+    dropdown_option = page.locator("div.ng-option").first
+    if await dropdown_option.is_visible():
+        await dropdown_option.click()
+    else:
+        # Tenta via texto parcial
+        await page.locator(f"div.ng-option:has-text('{texto[:20]}')").first.click()
+
+    await page.wait_for_timeout(1000)
+
+
+async def simular_financiamento(page, cliente: dict) -> dict:
     """Preenche o formulário do Santander e coleta o resultado."""
     try:
-        print(f"  [NAV] Abrindo site...")
-        await page.goto(SITE_URL, wait_until="networkidle", timeout=60000)
-        await page.wait_for_timeout(3000)
+        # 1. Abrir site
+        print(f"  [1/8] Abrindo site...")
+        await page.goto(SITE_URL, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(5000)
 
-        # 1. Pessoa Física
-        print(f"  [FORM] Clicando em Pessoa Física...")
-        pf_btn = page.locator("text=Pessoa Física").first
-        if await pf_btn.is_visible():
-            await pf_btn.click()
+        # 2. Clicar em Pessoa Física
+        print(f"  [2/8] Clicando em Pessoa Física...")
+        await page.locator("button.btn-person").click()
         await page.wait_for_timeout(2000)
 
-        # 2. Dados pessoais
-        print(f"  [FORM] Preenchendo dados pessoais...")
+        # 3. Preencher dados pessoais
+        print(f"  [3/8] Preenchendo dados pessoais...")
 
-        # Data de nascimento
-        nascimento_input = page.locator('input[placeholder*="nascimento"], input[name*="nascimento"], input[name*="birth"], input[id*="nascimento"]').first
-        if not await nascimento_input.is_visible():
-            nascimento_input = page.locator('input[type="text"], input[type="tel"]').first
-        await nascimento_input.click()
-        await nascimento_input.fill(cliente.get("data_nascimento", ""))
+        # Data de nascimento (formato DD/MM/AAAA)
+        nascimento = cliente.get("data_nascimento", "")
+        input_nascimento = page.locator('input[formcontrolname="dateOfBirth"]')
+        await input_nascimento.click()
+        await input_nascimento.type(nascimento, delay=50)
+        await page.wait_for_timeout(500)
 
         # CPF
-        cpf_input = page.locator('input[placeholder*="CPF"], input[name*="cpf"], input[id*="cpf"]').first
-        if not await cpf_input.is_visible():
-            cpf_input = page.locator('input[type="text"], input[type="tel"]').nth(1)
-        await cpf_input.click()
-        await cpf_input.fill(cliente["cpf"])
+        cpf = cliente["cpf"]
+        input_cpf = page.locator('input[formcontrolname="cpf"]')
+        await input_cpf.click()
+        await input_cpf.type(cpf, delay=30)
+        await page.wait_for_timeout(500)
 
         # Email
         email = cliente.get("email") or gerar_email(cliente.get("nome", ""))
-        email_input = page.locator('input[type="email"], input[placeholder*="mail"], input[name*="email"]').first
-        await email_input.click()
-        await email_input.fill(email)
+        input_email = page.locator('input[formcontrolname="email"]')
+        await input_email.click()
+        await input_email.type(email, delay=30)
+        await page.wait_for_timeout(500)
 
         # Celular
-        tel = cliente.get("telefone", "")
-        tel_input = page.locator('input[placeholder*="celular"], input[placeholder*="telefone"], input[name*="celular"], input[type="tel"]').first
-        await tel_input.click()
-        await tel_input.fill(tel)
+        telefone = cliente.get("telefone", "")
+        input_cel = page.locator('input[formcontrolname="cellNumber"]')
+        await input_cel.click()
+        await input_cel.type(telefone, delay=30)
+        await page.wait_for_timeout(500)
 
-        # CNH = Sim
-        cnh_sim = page.locator('text=Sim').first
-        if await cnh_sim.is_visible():
-            await cnh_sim.click()
-        await page.wait_for_timeout(1000)
+        # CNH = Sim (se existir)
+        try:
+            cnh_sim = page.locator("text=Sim").first
+            if await cnh_sim.is_visible(timeout=2000):
+                await cnh_sim.click()
+                await page.wait_for_timeout(500)
+        except:
+            pass
 
-        # 3. Quero simular
-        print(f"  [FORM] Clicando em Quero simular...")
-        simular_btn = page.locator('button:has-text("Quero simular"), a:has-text("Quero simular")').first
-        await simular_btn.click()
+        # 4. Clicar em "Quero simular"
+        print(f"  [4/8] Clicando em Quero simular...")
+        await page.locator("button.btn-simulate").click()
+        await page.wait_for_timeout(4000)
+
+        # 5. Clicar em "Carro"
+        print(f"  [5/8] Escolhendo Carro...")
+        await page.locator("button.btn-vehicle").click()
         await page.wait_for_timeout(3000)
 
-        # 4. Carro
-        print(f"  [FORM] Escolhendo Carro...")
-        carro_btn = page.locator('text=Carro').first
-        if await carro_btn.is_visible():
-            await carro_btn.click()
-        await page.wait_for_timeout(2000)
+        # 6. Clicar em "Você e o dono" (C2C)
+        print(f"  [6/8] Clicando em 'Você e o dono'...")
+        await page.locator("button.btn-c2c-financing").click()
+        await page.wait_for_timeout(3000)
 
-        # 5. Dados do veículo
-        print(f"  [FORM] Preenchendo veículo...")
+        # 7. Preencher detalhes do veículo
+        print(f"  [7/8] Preenchendo veículo...")
 
-        # Marca
-        marca_select = page.locator('select[name*="marca"], select[id*="marca"]').first
-        if await marca_select.is_visible():
-            await marca_select.select_option(label=VEICULO["marca"])
-        else:
-            await page.locator('text=Marca').first.click()
-            await page.wait_for_timeout(1000)
-            await page.locator(f'text={VEICULO["marca"]}').first.click()
-        await page.wait_for_timeout(2000)
+        # Marca (1º combobox - index 0)
+        await preencher_combobox(page, 0, VEICULO["marca"])
+        print(f"    Marca: {VEICULO['marca']}")
 
-        # Ano
-        ano_select = page.locator('select[name*="ano"], select[id*="ano"]').first
-        if await ano_select.is_visible():
-            await ano_select.select_option(label=VEICULO["ano"])
-        else:
-            await page.locator('text=Ano').first.click()
-            await page.wait_for_timeout(1000)
-            await page.locator(f'text={VEICULO["ano"]}').first.click()
-        await page.wait_for_timeout(2000)
+        # Ano/modelo (2º combobox - index 1)
+        await preencher_combobox(page, 1, VEICULO["ano"])
+        print(f"    Ano: {VEICULO['ano']}")
 
-        # Modelo
-        modelo_select = page.locator('select[name*="modelo"], select[id*="modelo"]').first
-        if await modelo_select.is_visible():
-            await modelo_select.select_option(label=VEICULO["modelo"])
-        else:
-            await page.locator('text=Modelo').first.click()
-            await page.wait_for_timeout(1000)
-            await page.locator(f'text={VEICULO["modelo"]}').first.click()
-        await page.wait_for_timeout(2000)
+        # Modelo (3º combobox - index 2)
+        await preencher_combobox(page, 2, VEICULO["modelo"][:15])
+        print(f"    Modelo: {VEICULO['modelo']}")
 
-        # UF
-        uf = cliente.get("uf", "SP")
-        uf_select = page.locator('select[name*="uf"], select[name*="estado"], select[id*="uf"]').first
-        if await uf_select.is_visible():
-            try:
-                await uf_select.select_option(label=uf)
-            except:
-                await uf_select.select_option(value=uf)
+        # UF (4º combobox - index 3)
+        uf_sigla = cliente.get("uf", "SP")
+        uf_nome = UF_NOME.get(uf_sigla, "São Paulo")
+        await preencher_combobox(page, 3, uf_nome)
+        print(f"    UF: {uf_nome}")
+
+        # Valor do veículo
+        input_valor = page.locator("input#valor-veiculo")
+        await input_valor.click()
+        await input_valor.fill("")
+        await input_valor.type("200000", delay=50)
+        await page.wait_for_timeout(1000)
+        print(f"    Valor: R$ 200.000,00")
+
+        # 8. Clicar em "Ver simulação"
+        print(f"  [8/8] Clicando em Ver simulação...")
+        btn_simular = page.locator("button.btn-simulate")
+        # Esperar botão ficar habilitado
+        await btn_simular.wait_for(state="visible", timeout=5000)
         await page.wait_for_timeout(1000)
 
-        # Valor
-        valor_input = page.locator('input[name*="valor"], input[id*="valor"], input[placeholder*="valor"]').first
-        await valor_input.click()
-        await valor_input.fill(VEICULO["valor"])
-        await page.wait_for_timeout(1000)
+        # Verificar se está disabled
+        is_disabled = await btn_simular.get_attribute("disabled")
+        if is_disabled is not None:
+            print(f"  [AVISO] Botão ainda desabilitado, aguardando...")
+            await page.wait_for_timeout(3000)
 
-        # 6. Ver simulação
-        print(f"  [FORM] Clicando em Ver simulação...")
-        ver_btn = page.locator('button:has-text("Ver simulação"), button:has-text("Ver simulacao")').first
-        await ver_btn.click()
-        await page.wait_for_timeout(5000)
+        await btn_simular.click()
+        await page.wait_for_timeout(8000)
 
-        # 7. Coletar resultados
+        # 9. Coletar resultados
         print(f"  [RESULT] Coletando resultados...")
-        page_text = await page.inner_text("body")
-        valor_veiculo = 200000.00
 
-        entrada_match = re.search(r"[Ee]ntrada[:\s]*R?\$?\s*([\d.,]+)", page_text)
-        entrada_valor = 0.0
-        if entrada_match:
-            entrada_str = entrada_match.group(1).replace(".", "").replace(",", ".")
-            entrada_valor = float(entrada_str)
+        # Entrada em % (ex: "30%")
+        entrada_pct = 0.0
+        try:
+            entrada_el = page.locator("strong").first
+            entrada_text = await entrada_el.inner_text(timeout=10000)
+            entrada_match = re.search(r"(\d+)", entrada_text)
+            if entrada_match:
+                entrada_pct = float(entrada_match.group(1))
+        except:
+            pass
 
-        parcela_match = re.search(r"[Pp]arcela[s]?[:\s]*R?\$?\s*([\d.,]+)", page_text)
+        # Valor da entrada
+        entrada_valor = (entrada_pct / 100) * 200000
+
+        # Valor da parcela (ex: "R$ 4.196,39")
         parcela_valor = 0.0
-        if parcela_match:
-            parcela_str = parcela_match.group(1).replace(".", "").replace(",", ".")
-            parcela_valor = float(parcela_str)
+        try:
+            parcela_el = page.locator("#installmentValue")
+            parcela_text = await parcela_el.inner_text(timeout=5000)
+            parcela_match = re.search(r"[\d.,]+", parcela_text.replace("R$", "").replace("\xa0", ""))
+            if parcela_match:
+                parcela_str = parcela_match.group(0).replace(".", "").replace(",", ".")
+                parcela_valor = float(parcela_str)
+        except:
+            pass
 
-        qtd_match = re.search(r"(\d+)\s*(?:[xX]|vezes|parcelas|meses)", page_text)
+        # Quantidade de parcelas
         parcela_qtd = 0
-        if qtd_match:
-            parcela_qtd = int(qtd_match.group(1))
+        try:
+            page_text = await page.inner_text("body")
+            qtd_match = re.search(r"(\d+)\s*(?:x|X|vezes|parcelas|meses)", page_text)
+            if qtd_match:
+                parcela_qtd = int(qtd_match.group(1))
+        except:
+            pass
 
-        entrada_pct = (entrada_valor / valor_veiculo) * 100 if valor_veiculo > 0 else 0
+        # Se não achou entrada, pode ser bloqueado
+        if entrada_pct == 0 and parcela_valor == 0:
+            # Tenta ver se tem mensagem de erro
+            page_text = await page.inner_text("body")
+            if "não foi possível" in page_text.lower() or "tente novamente" in page_text.lower() or "indisponível" in page_text.lower():
+                print(f"  [RESULT] BLOQUEADO - simulação não passou")
+                await page.screenshot(path=f"bloqueado_{cliente['cpf']}.png")
+                return {"cpf": cliente["cpf"], "bloqueado": True}
 
-        print(f"  [RESULT] Entrada: R$ {entrada_valor:.2f} ({entrada_pct:.1f}%)")
-        print(f"  [RESULT] Parcela: R$ {parcela_valor:.2f} x {parcela_qtd}")
+        print(f"  [RESULT] Entrada: {entrada_pct}% = R$ {entrada_valor:,.2f}")
+        print(f"  [RESULT] Parcela: R$ {parcela_valor:,.2f} x {parcela_qtd}")
+
+        await page.screenshot(path=f"resultado_{cliente['cpf']}.png")
 
         return {
             "cpf": cliente["cpf"],
@@ -192,56 +244,69 @@ async def simular_financiamento(page, cliente: dict) -> dict | None:
         }
 
     except Exception as e:
-        print(f"  [ERRO] Falha: {e}")
+        print(f"  [ERRO] {e}")
         try:
             await page.screenshot(path=f"erro_{cliente['cpf']}.png")
-            print(f"  [DEBUG] Screenshot: erro_{cliente['cpf']}.png")
         except:
             pass
-        return {
-            "cpf": cliente["cpf"],
-            "bloqueado": True,
-        }
+        return {"cpf": cliente["cpf"], "bloqueado": True}
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Simulador Santander Financiamentos")
-    parser.add_argument("--arquivo", type=str, required=True, help="JSON exportado do dashboard (cpfs_para_simular.json)")
-    parser.add_argument("--saida", type=str, default="resultado_simulacao.json", help="Arquivo de saída com resultados")
+    parser.add_argument("--arquivo", type=str, required=True, help="JSON exportado do dashboard")
+    parser.add_argument("--saida", type=str, default="resultado_simulacao.json", help="Arquivo de saída")
     parser.add_argument("--headless", action="store_true", help="Rodar sem abrir o navegador")
+    parser.add_argument("--inicio", type=int, default=0, help="Índice inicial (para continuar de onde parou)")
     args = parser.parse_args()
 
     with open(args.arquivo, "r", encoding="utf-8") as f:
         clientes = json.load(f)
 
+    # Filtrar a partir do índice inicial
+    clientes = clientes[args.inicio:]
     print(f"Total de clientes para simular: {len(clientes)}")
+
+    # Carregar resultados anteriores se existirem
     resultados = []
+    try:
+        with open(args.saida, "r", encoding="utf-8") as f:
+            resultados = json.load(f)
+            print(f"Resultados anteriores carregados: {len(resultados)}")
+    except:
+        pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=args.headless)
+        browser = await p.chromium.launch(
+            headless=args.headless,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
 
         for i, cliente in enumerate(clientes):
+            num = args.inicio + i + 1
+            total = args.inicio + len(clientes)
             print(f"\n{'='*60}")
-            print(f"[{i+1}/{len(clientes)}] {cliente.get('nome', 'N/A')} - CPF: {cliente['cpf']}")
+            print(f"[{num}/{total}] {cliente.get('nome', 'N/A')} - CPF: {cliente['cpf']}")
             print(f"{'='*60}")
 
             context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                viewport={"width": 1280, "height": 900},
                 locale="pt-BR",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             )
             page = await context.new_page()
 
             resultado = await simular_financiamento(page, cliente)
             resultados.append(resultado)
 
+            # Salvar parcial a cada cliente (para não perder progresso)
+            with open(args.saida, "w", encoding="utf-8") as f:
+                json.dump(resultados, f, ensure_ascii=False, indent=2)
+
             await context.close()
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
         await browser.close()
-
-    # Salvar resultados
-    with open(args.saida, "w", encoding="utf-8") as f:
-        json.dump(resultados, f, ensure_ascii=False, indent=2)
 
     # Resumo
     aprovados = [r for r in resultados if not r.get("bloqueado")]
@@ -252,7 +317,7 @@ async def main():
     print(f"Aprovados: {len(aprovados)}")
     print(f"Bloqueados: {len(bloqueados)}")
     print(f"Arquivo salvo: {args.saida}")
-    print(f"Importe o arquivo '{args.saida}' no dashboard para concluir.")
+    print(f"\nImporte '{args.saida}' no dashboard para concluir.")
 
 
 if __name__ == "__main__":

@@ -17,7 +17,10 @@ export async function POST(request) {
       if (cpf.length !== 11) continue;
 
       const nome = partes[1]?.trim() || "";
-      const dataNascimento = partes[2]?.split("/")[0]?.trim() || "";
+      // Formato: "03/01/1984 / 42 anos" -> extrair "03/01/1984"
+      const dataRaw = partes[2]?.trim() || "";
+      const dataMatch = dataRaw.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const dataNascimento = dataMatch ? dataMatch[1] : dataRaw;
       const profissao = partes[3]?.trim() || "";
       // Formato: CPF | Nome | Data | Profissão | (vazio) | Bairro | Cidade/UF | Consultar
       const bairro = partes[5]?.trim() || partes[4]?.trim() || "";
