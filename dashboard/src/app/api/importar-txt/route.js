@@ -19,14 +19,19 @@ export async function POST(request) {
       const nome = partes[1]?.trim() || "";
       const dataNascimento = partes[2]?.split("/")[0]?.trim() || "";
       const profissao = partes[3]?.trim() || "";
-      const bairro = partes[4]?.trim() || "";
-      const cidadeUf = partes[5]?.trim() || "";
+      // Formato: CPF | Nome | Data | Profissão | (vazio) | Bairro | Cidade/UF | Consultar
+      const bairro = partes[5]?.trim() || partes[4]?.trim() || "";
+      const cidadeUf = partes[6]?.trim() || partes[5]?.trim() || "";
 
-      // Extrair UF da cidade/UF (ex: "Rio de Janeiro/RJ" -> "RJ")
+      // Extrair UF da cidade/UF (ex: "Taubaté/SP" -> "SP", "Rio de Janeiro/RJ" -> "RJ")
       let uf = "";
-      const ufMatch = cidadeUf.match(/\/([A-Z]{2})$/);
-      if (ufMatch) {
-        uf = ufMatch[1];
+      // Tenta achar UF no formato Cidade/UF em todas as colunas
+      for (let j = partes.length - 1; j >= 0; j--) {
+        const m = partes[j]?.trim().match(/\/([A-Z]{2})$/);
+        if (m) {
+          uf = m[1];
+          break;
+        }
       }
 
       registros.push({
