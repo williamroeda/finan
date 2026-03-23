@@ -108,7 +108,7 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // CONSULTAR API (pendentes)
+  // CONSULTAR API (pendentes) - 1 por 1 com atualização em tempo real
   async function handleConsultar() {
     const pendentes = simulacoes.filter((s) => s.status === "PENDENTE");
     if (pendentes.length === 0) {
@@ -118,22 +118,37 @@ export default function Home() {
     }
 
     setConsultando(true);
-    const cpfs = pendentes.map((s) => s.cpf);
-    const batchSize = 10;
+    const total = pendentes.length;
+    let concluidos = 0;
+    let erros = 0;
 
-    for (let i = 0; i < cpfs.length; i += batchSize) {
-      const batch = cpfs.slice(i, i + batchSize);
-      setProgresso(`Consultando ${i + 1}-${Math.min(i + batchSize, cpfs.length)} de ${cpfs.length}...`);
+    for (const item of pendentes) {
+      concluidos++;
+      setProgresso(`Consultando ${concluidos}/${total} — ${item.nome || item.cpf}...`);
 
-      await fetch("/api/consultar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cpfs: batch }),
-      });
+      try {
+        const resp = await fetch("/api/consultar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cpfs: [item.cpf] }),
+        });
+        const result = await resp.json();
+
+        // Atualiza o item localmente na tabela em tempo real
+        setSimulacoes((prev) =>
+          prev.map((s) =>
+            s.cpf === item.cpf
+              ? { ...s, status: "CONSULTADO", consultado_em: new Date().toISOString() }
+              : s
+          )
+        );
+      } catch (e) {
+        erros++;
+      }
     }
 
-    setProgresso(`${cpfs.length} CPFs consultados!`);
-    await fetchSimulacoes();
+    setProgresso(`✅ ${total} consultados${erros > 0 ? ` (${erros} erros)` : ""}!`);
+    await fetchSimulacoes(); // refresh final para pegar dados completos
     setConsultando(false);
     setTimeout(() => setProgresso(""), 5000);
   }

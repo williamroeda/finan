@@ -63,8 +63,8 @@ export async function POST(request) {
         resultados.push({ cpf, status: "erro", erro: e.message });
       }
 
-      // Delay entre consultas
-      await new Promise((r) => setTimeout(r, 500));
+      // Delay entre consultas (evitar rate limit)
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     return NextResponse.json({ resultados });
