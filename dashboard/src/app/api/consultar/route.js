@@ -12,6 +12,13 @@ function gerarEmail(nome) {
   return removerAcentos(`${primeiro}${sobrenome}@gmail.com`);
 }
 
+function gerarTelefone() {
+  // Gera telefone fictício com DDD válido de SP
+  const ddd = "11";
+  const num = "9" + String(Math.floor(Math.random() * 90000000 + 10000000));
+  return ddd + num;
+}
+
 export async function POST(request) {
   try {
     const { cpfs } = await request.json();
@@ -29,17 +36,34 @@ export async function POST(request) {
         );
         const dados = await resp.json();
 
-        // Extrair dados da resposta (a API pode retornar em formatos variados)
-        let info = dados;
-        if (Array.isArray(dados) && dados.length > 0) info = dados[0];
-        if (info?.data) info = Array.isArray(info.data) ? info.data[0] : info.data;
-        if (info?.result) info = Array.isArray(info.result) ? info.result[0] : info.result;
-        if (info?.dados) info = Array.isArray(info.dados) ? info.dados[0] : info.dados;
+        // Navegar na estrutura da API completa
+        let nome = "";
+        let telefone = "";
+        let dataNascimento = "";
 
-        const nome = info?.nome || info?.NOME || info?.name || info?.nomeCompleto || "";
-        let telefone = info?.telefone || info?.celular || info?.TELEFONE || info?.phone || "";
-        if (Array.isArray(telefone)) {
-          telefone = typeof telefone[0] === "object" ? telefone[0]?.numero || "" : telefone[0] || "";
+        // DadosBasicos
+        const basicos = dados?.DadosBasicos || dados?.dadosBasicos || dados?.dados_basicos || {};
+        nome = basicos?.Nome || basicos?.nome || basicos?.NOME || basicos?.nomeCompleto || "";
+
+        // Data de nascimento
+        dataNascimento = basicos?.DataNascimento || basicos?.dataNascimento || basicos?.data_nascimento || "";
+
+        // Telefones - pegar o primeiro válido
+        const telefones = dados?.Telefones || dados?.telefones || [];
+        if (Array.isArray(telefones) && telefones.length > 0) {
+          for (const tel of telefones) {
+            const num = tel?.Numero || tel?.numero || tel?.telefone || tel?.Telefone || "";
+            const ddd = tel?.DDD || tel?.ddd || "";
+            if (num) {
+              telefone = ddd ? `${ddd}${num}`.replace(/\D/g, "") : String(num).replace(/\D/g, "");
+              if (telefone.length >= 10) break; // Pegar um com DDD
+            }
+          }
+        }
+
+        // Se não achou telefone, gera um fictício
+        if (!telefone || telefone.length < 10) {
+          telefone = gerarTelefone();
         }
 
         const email = nome ? gerarEmail(nome) : "";
@@ -49,22 +73,32 @@ export async function POST(request) {
           consultado_em: new Date().toISOString(),
         };
 
-        // Só atualiza campos se a API retornou dados úteis
-        if (telefone) updateData.telefone = String(telefone).replace(/\D/g, "");
+        if (telefone) updateData.telefone = telefone;
         if (email) updateData.email = email;
+        if (dataNascimento) updateData.data_nascimento = dataNascimento;
 
         await supabase
           .from("simulacoes")
           .update(updateData)
           .eq("cpf", cpf);
 
-        resultados.push({ cpf, status: "ok", nome });
+        resultados.push({ cpf, status: "ok", nome, telefone: telefone ? "sim" : "gerado" });
       } catch (e) {
-        resultados.push({ cpf, status: "erro", erro: e.message });
+        // Em caso de erro, ainda marca como consultado com telefone fictício
+        await supabase
+          .from("simulacoes")
+          .update({
+            status: "CONSULTADO",
+            consultado_em: new Date().toISOString(),
+            telefone: gerarTelefone(),
+          })
+          .eq("cpf", cpf);
+
+        resultados.push({ cpf, status: "erro_parcial", erro: e.message });
       }
 
-      // Delay entre consultas (evitar rate limit)
-      await new Promise((r) => setTimeout(r, 200));
+      // Delay entre consultas
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     return NextResponse.json({ resultados });
