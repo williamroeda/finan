@@ -322,10 +322,6 @@ async def main():
     with open(args.arquivo, "r", encoding="utf-8") as f:
         clientes = json.load(f)
 
-    # Filtrar a partir do índice inicial
-    clientes = clientes[args.inicio:]
-    print(f"Total de clientes para simular: {len(clientes)}")
-
     # Carregar resultados anteriores se existirem
     resultados = []
     try:
@@ -335,15 +331,27 @@ async def main():
     except:
         pass
 
+    # Pular CPFs já processados
+    cpfs_ja_feitos = {r["cpf"] for r in resultados}
+    clientes_pendentes = [c for c in clientes if c["cpf"] not in cpfs_ja_feitos]
+    print(f"Total no arquivo: {len(clientes)}")
+    print(f"Já processados: {len(cpfs_ja_feitos)}")
+    print(f"Restantes para simular: {len(clientes_pendentes)}")
+
+    if len(clientes_pendentes) == 0:
+        print("\nTodos os CPFs já foram processados!")
+        print(f"Arquivo de resultados: {args.saida}")
+        return
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=args.headless,
             args=["--disable-blink-features=AutomationControlled"]
         )
 
-        for i, cliente in enumerate(clientes):
-            num = args.inicio + i + 1
-            total = args.inicio + len(clientes)
+        for i, cliente in enumerate(clientes_pendentes):
+            num = i + 1
+            total = len(clientes_pendentes)
             print(f"\n{'='*60}")
             print(f"[{num}/{total}] {cliente.get('nome', 'N/A')} - CPF: {cliente['cpf']}")
             print(f"{'='*60}")

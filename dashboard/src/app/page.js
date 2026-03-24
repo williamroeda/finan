@@ -23,8 +23,22 @@ function formatCPF(cpf) {
 }
 
 function formatCurrency(value) {
-  if (value == null) return "—";
+  if (value == null || value === 0) return "—";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+}
+
+function formatRenda(value) {
+  if (!value || value === 0) return "—";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(value);
+}
+
+function ScoreBadge({ score }) {
+  if (!score) return <span className="text-slate-600">—</span>;
+  let color = "text-red-400";
+  if (score >= 700) color = "text-emerald-400";
+  else if (score >= 500) color = "text-yellow-400";
+  else if (score >= 300) color = "text-orange-400";
+  return <span className={`font-bold ${color}`}>{score}</span>;
 }
 
 function Badge({ type, value }) {
@@ -54,6 +68,90 @@ function StatCard({ title, value, icon, onClick, active }) {
   );
 }
 
+// Modal de detalhes do cliente
+function ClienteModal({ cliente, onClose }) {
+  if (!cliente) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-white">{cliente.nome || "—"}</h3>
+            <p className="text-slate-400 text-sm font-mono">{formatCPF(cliente.cpf)}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">Status</p>
+            <div className="mt-1"><Badge type="status" value={cliente.status} /></div>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">Classificação</p>
+            <div className="mt-1">{cliente.classificacao ? <Badge type="class" value={cliente.classificacao} /> : <span className="text-slate-600">—</span>}</div>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">Score</p>
+            <div className="mt-1"><ScoreBadge score={cliente.score} /></div>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">Renda</p>
+            <p className="text-white font-medium mt-1">{formatRenda(cliente.renda)}</p>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">UF</p>
+            <p className="text-white font-medium mt-1">{cliente.uf || "—"}</p>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3">
+            <p className="text-slate-500 text-xs">Profissão</p>
+            <p className="text-white font-medium mt-1 text-xs">{cliente.profissao || "—"}</p>
+          </div>
+        </div>
+
+        {/* Pré-Aprovado */}
+        {cliente.pre_aprovado_valor > 0 && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 mb-4">
+            <p className="text-emerald-400 text-xs font-medium mb-1">💰 Pré-Aprovado</p>
+            <p className="text-white font-bold text-lg">{formatCurrency(cliente.pre_aprovado_valor)}</p>
+            <p className="text-slate-400 text-xs mt-1">
+              Entrada mín: {cliente.pre_aprovado_entrada_min || "—"}% | Prazo máx: {cliente.pre_aprovado_prazo_max || "—"} meses
+            </p>
+          </div>
+        )}
+
+        {/* Resultado da Simulação */}
+        {cliente.status === "CONCLUIDO" && cliente.classificacao !== "BLOQUEADO" && (
+          <div className="bg-slate-900/50 rounded-lg p-3 mb-4">
+            <p className="text-slate-500 text-xs mb-2">Resultado da Simulação</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-slate-500 text-xs">Entrada</p>
+                <p className="text-white font-bold">{formatCurrency(cliente.entrada_valor)}</p>
+                <p className="text-slate-400 text-xs">{cliente.entrada_percentual}%</p>
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs">Parcela</p>
+                <p className="text-white font-bold">{formatCurrency(cliente.parcela_valor)}</p>
+                <p className="text-slate-400 text-xs">{cliente.parcela_qtd}x</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="text-slate-500 text-xs space-y-1">
+          {cliente.data_nascimento && <p>Nascimento: {cliente.data_nascimento}</p>}
+          {cliente.email && <p>Email: {cliente.email}</p>}
+          {cliente.telefone && <p>Tel: {cliente.telefone}</p>}
+          {cliente.cidade_uf && <p>Cidade: {cliente.cidade_uf}</p>}
+          {cliente.poder_aquisitivo && <p>Poder aquisitivo: {cliente.poder_aquisitivo}</p>}
+          {cliente.criado_em && <p>Importado: {new Date(cliente.criado_em).toLocaleString("pt-BR")}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [simulacoes, setSimulacoes] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState("TODOS");
@@ -64,6 +162,7 @@ export default function Home() {
   const [consultando, setConsultando] = useState(false);
   const [importandoResultado, setImportandoResultado] = useState(false);
   const [progresso, setProgresso] = useState("");
+  const [clienteSelecionado, setClienteSelecionado] = useState(null);
   const fileInputRef = useRef(null);
   const resultFileRef = useRef(null);
 
@@ -148,7 +247,7 @@ export default function Home() {
     }
 
     setProgresso(`✅ ${total} consultados${erros > 0 ? ` (${erros} erros)` : ""}!`);
-    await fetchSimulacoes(); // refresh final para pegar dados completos
+    await fetchSimulacoes();
     setConsultando(false);
     setTimeout(() => setProgresso(""), 5000);
   }
@@ -159,8 +258,8 @@ export default function Home() {
     const resp = await fetch("/api/exportar");
     const data = await resp.json();
 
-    if (data.length === 0) {
-      setProgresso("Nenhum CPF consultado para exportar");
+    if (data.error || data.length === 0) {
+      setProgresso(data.error || "Nenhum CPF consultado para exportar");
       setTimeout(() => setProgresso(""), 3000);
       return;
     }
@@ -236,7 +335,10 @@ export default function Home() {
   };
 
   return (
-    <main className="max-w-7xl mx-auto px-4 py-8">
+    <main className="max-w-[1400px] mx-auto px-4 py-8">
+      {/* Modal */}
+      <ClienteModal cliente={clienteSelecionado} onClose={() => setClienteSelecionado(null)} />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -252,13 +354,10 @@ export default function Home() {
       <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 mb-6">
         <h2 className="text-white font-semibold mb-4">Ações</h2>
         <div className="flex flex-wrap gap-3">
-          {/* Importar TXT */}
           <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
             📄 Importar TXT
             <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={handleImportTxt} disabled={importando} />
           </label>
-
-          {/* Consultar API */}
           <button
             onClick={handleConsultar}
             disabled={consultando || stats.pendente === 0}
@@ -266,8 +365,6 @@ export default function Home() {
           >
             {consultando ? "⏳ Consultando..." : `🔍 Consultar API (${stats.pendente})`}
           </button>
-
-          {/* Exportar */}
           <button
             onClick={handleExportar}
             disabled={stats.consultado === 0}
@@ -275,36 +372,16 @@ export default function Home() {
           >
             📥 Exportar CPFs ({stats.consultado})
           </button>
-
-          {/* Importar Resultado */}
           <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
             📊 Importar Resultado
             <input ref={resultFileRef} type="file" accept=".json" className="hidden" onChange={handleImportarResultado} disabled={importandoResultado} />
           </label>
         </div>
-
-        {/* Progresso */}
         {progresso && (
-          <div className="mt-3 px-3 py-2 bg-slate-900/50 rounded-lg text-sm text-slate-300">
-            {progresso}
-          </div>
+          <div className="mt-3 px-3 py-2 bg-slate-900/50 rounded-lg text-sm text-slate-300">{progresso}</div>
         )}
-
-        {/* Fluxo */}
         <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
-          <span>📄 Importar TXT</span>
-          <span>→</span>
-          <span>⏳ Pendente</span>
-          <span>→</span>
-          <span>🔍 Consultar API</span>
-          <span>→</span>
-          <span>📥 Exportar</span>
-          <span>→</span>
-          <span>🐍 Python</span>
-          <span>→</span>
-          <span>📊 Importar Resultado</span>
-          <span>→</span>
-          <span>✅ Concluído</span>
+          <span>📄 TXT</span><span>→</span><span>⏳ Pendente</span><span>→</span><span>🔍 API</span><span>→</span><span>📥 Exportar</span><span>→</span><span>🐍 Python</span><span>→</span><span>📊 Resultado</span><span>→</span><span>✅ Concluído</span>
         </div>
       </div>
 
@@ -316,7 +393,6 @@ export default function Home() {
         <StatCard title="Concluídos" value={stats.concluido} icon="✅" onClick={() => { setFiltroStatus("CONCLUIDO"); setFiltroClass("TODOS"); }} active={filtroStatus === "CONCLUIDO"} />
       </div>
 
-      {/* Stats por Classificação */}
       {stats.concluido > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <StatCard title="Ótimo (0-10%)" value={stats.otimo} icon="🟢" onClick={() => { setFiltroClass("OTIMO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "OTIMO"} />
@@ -351,36 +427,53 @@ export default function Home() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700/50">
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Nome</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">CPF</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">UF</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Status</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Classificação</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Entrada</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Parcela</th>
+                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Nome</th>
+                  <th className="text-left px-3 py-3 text-slate-400 font-medium">CPF</th>
+                  <th className="text-left px-3 py-3 text-slate-400 font-medium">UF</th>
+                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Score</th>
+                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Renda</th>
+                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Status</th>
+                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Class.</th>
+                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Pré-Aprov.</th>
+                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Entrada</th>
+                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Parcela</th>
                 </tr>
               </thead>
               <tbody>
                 {filtradas.map((s) => (
-                  <tr key={s.id} className="border-b border-slate-700/30 hover:bg-slate-700/20">
-                    <td className="px-4 py-3 text-white font-medium">{s.nome || "—"}</td>
-                    <td className="px-4 py-3 text-slate-300 font-mono text-xs">{formatCPF(s.cpf)}</td>
-                    <td className="px-4 py-3 text-slate-300">{s.uf || "—"}</td>
-                    <td className="px-4 py-3"><Badge type="status" value={s.status} /></td>
-                    <td className="px-4 py-3">{s.classificacao ? <Badge type="class" value={s.classificacao} /> : <span className="text-slate-600">—</span>}</td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {s.entrada_valor != null ? (
+                  <tr
+                    key={s.id}
+                    className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
+                    onClick={() => setClienteSelecionado(s)}
+                  >
+                    <td className="px-3 py-3 text-white font-medium">{s.nome || "—"}</td>
+                    <td className="px-3 py-3 text-slate-300 font-mono text-xs">{formatCPF(s.cpf)}</td>
+                    <td className="px-3 py-3 text-slate-300">{s.uf || "—"}</td>
+                    <td className="px-3 py-3 text-right"><ScoreBadge score={s.score} /></td>
+                    <td className="px-3 py-3 text-right text-slate-300 text-xs">{formatRenda(s.renda)}</td>
+                    <td className="px-3 py-3"><Badge type="status" value={s.status} /></td>
+                    <td className="px-3 py-3">{s.classificacao ? <Badge type="class" value={s.classificacao} /> : <span className="text-slate-600">—</span>}</td>
+                    <td className="px-3 py-3 text-right">
+                      {s.pre_aprovado_valor > 0 ? (
                         <div>
-                          <div>{formatCurrency(s.entrada_valor)}</div>
-                          <div className="text-xs text-slate-500">{s.entrada_percentual}%</div>
+                          <div className="text-emerald-400 font-medium text-xs">{formatCurrency(s.pre_aprovado_valor)}</div>
+                          <div className="text-slate-500 text-[10px]">{s.pre_aprovado_entrada_min}% / {s.pre_aprovado_prazo_max}m</div>
+                        </div>
+                      ) : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right text-slate-300">
+                      {s.entrada_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
+                        <div>
+                          <div className="text-xs">{formatCurrency(s.entrada_valor)}</div>
+                          <div className="text-[10px] text-slate-500">{s.entrada_percentual}%</div>
                         </div>
                       ) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {s.parcela_valor != null ? (
+                    <td className="px-3 py-3 text-right text-slate-300">
+                      {s.parcela_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
                         <div>
-                          <div>{formatCurrency(s.parcela_valor)}</div>
-                          <div className="text-xs text-slate-500">{s.parcela_qtd}x</div>
+                          <div className="text-xs">{formatCurrency(s.parcela_valor)}</div>
+                          <div className="text-[10px] text-slate-500">{s.parcela_qtd}x</div>
                         </div>
                       ) : "—"}
                     </td>
