@@ -18,24 +18,39 @@ function gerarTelefone() {
   return ddd + num;
 }
 
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) throw new Error(`Missing env: url=${!!url}, key=${!!key}`);
+  return createClient(url, key);
+}
+
 export async function POST(request) {
   try {
     const { cpfs } = await request.json();
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
+    const supabase = getSupabase();
     const apiToken = process.env.API_TOKEN;
     const apiUrl = process.env.API_URL;
 
     const resultados = [];
 
     for (const cpf of cpfs) {
+      const updateData = {
+        status: "CONSULTADO",
+        consultado_em: new Date().toISOString(),
+      };
+
       try {
+        // Chamar API
         const resp = await fetch(
           `${apiUrl}?token=${apiToken}&modulo=cpf&consulta=${cpf}`,
-          { signal: AbortSignal.timeout(15000) }
+          { signal: AbortSignal.timeout(30000) }
         );
+
+        if (!resp.ok) {
+          throw new Error(`API HTTP ${resp.status}`);
+        }
+
         const dados = await resp.json();
 
         // DadosBasicos
@@ -45,13 +60,18 @@ export async function POST(request) {
 
         // DadosEconomicos
         const economicos = dados?.DadosEconomicos || dados?.dadosEconomicos || {};
-        const renda = parseFloat(
-          String(economicos?.Renda || economicos?.renda || economicos?.RendaPresumida || "0")
-            .replace(/[R$\s.]/g, "").replace(",", ".")
-        ) || 0;
+
+        // Renda
+        let renda = 0;
+        const rendaRaw = economicos?.Renda || economicos?.renda || economicos?.RendaPresumida || "";
+        if (rendaRaw) {
+          const rendaStr = String(rendaRaw).replace(/[R$\s]/g, "").replace(/\./g, "").replace(",", ".");
+          renda = parseFloat(rendaStr) || 0;
+        }
+
         const poderAquisitivo = economicos?.PoderAquisitivo || economicos?.poderAquisitivo || "";
 
-        // Score - pode estar em vários lugares
+        // Score
         let score = 0;
         const scoreVal = economicos?.Score || economicos?.score ||
           economicos?.ScoreCredito || economicos?.scoreCredito ||
@@ -81,11 +101,6 @@ export async function POST(request) {
 
         const email = nome ? gerarEmail(nome) : "";
 
-        const updateData = {
-          status: "CONSULTADO",
-          consultado_em: new Date().toISOString(),
-        };
-
         if (telefone) updateData.telefone = telefone;
         if (email) updateData.email = email;
         if (dataNascimento) updateData.data_nascimento = dataNascimento;
@@ -93,22 +108,21 @@ export async function POST(request) {
         if (score > 0) updateData.score = score;
         if (poderAquisitivo) updateData.poder_aquisitivo = poderAquisitivo;
 
-        await supabase
-          .from("simulacoes")
-          .update(updateData)
-          .eq("cpf", cpf);
-
         resultados.push({ cpf, status: "ok", nome, renda, score });
       } catch (e) {
-        await supabase
-          .from("simulacoes")
-          .update({
-            status: "CONSULTADO",
-            consultado_em: new Date().toISOString(),
-            telefone: gerarTelefone(),
-          })
-          .eq("cpf", cpf);
-        resultados.push({ cpf, status: "erro_parcial", erro: e.message });
+        // Mesmo com erro na API, marcar como CONSULTADO
+        updateData.telefone = gerarTelefone();
+        resultados.push({ cpf, status: "erro_api", erro: e.message });
+      }
+
+      // SEMPRE salvar no banco, independente de erro
+      const { error: dbError } = await supabase
+        .from("simulacoes")
+        .update(updateData)
+        .eq("cpf", cpf);
+
+      if (dbError) {
+        resultados[resultados.length - 1].db_error = dbError.message;
       }
 
       await new Promise((r) => setTimeout(r, 300));
@@ -116,6 +130,6 @@ export async function POST(request) {
 
     return NextResponse.json({ resultados });
   } catch (e) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e.message, stack: e.stack }, { status: 500 });
   }
 }
