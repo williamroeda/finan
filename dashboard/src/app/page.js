@@ -51,6 +51,13 @@ function Badge({ type, value }) {
   );
 }
 
+function DecisaoBadge({ decisao }) {
+  if (!decisao) return null;
+  if (decisao === "APROVADO") return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">✅ Usar</span>;
+  if (decisao === "RECUSADO") return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-red-500/20 text-red-400 border-red-500/30">❌ Recusado</span>;
+  return null;
+}
+
 function StatCard({ title, value, icon, onClick, active }) {
   return (
     <button
@@ -69,7 +76,7 @@ function StatCard({ title, value, icon, onClick, active }) {
 }
 
 // Modal de detalhes do cliente
-function ClienteModal({ cliente, onClose }) {
+function ClienteModal({ cliente, onClose, onDecidir }) {
   if (!cliente) return null;
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -81,6 +88,16 @@ function ClienteModal({ cliente, onClose }) {
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
         </div>
+
+        {/* Decisão atual */}
+        {cliente.decisao && (
+          <div className={`rounded-lg p-3 mb-4 border ${cliente.decisao === "APROVADO" ? "bg-emerald-500/10 border-emerald-500/30" : "bg-red-500/10 border-red-500/30"}`}>
+            <p className={`text-sm font-medium ${cliente.decisao === "APROVADO" ? "text-emerald-400" : "text-red-400"}`}>
+              {cliente.decisao === "APROVADO" ? "✅ Marcado para USAR" : "❌ Marcado como RECUSADO"}
+            </p>
+            {cliente.decidido_em && <p className="text-slate-500 text-xs mt-1">em {new Date(cliente.decidido_em).toLocaleString("pt-BR")}</p>}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div className="bg-slate-900/50 rounded-lg p-3">
@@ -139,7 +156,7 @@ function ClienteModal({ cliente, onClose }) {
           </div>
         )}
 
-        <div className="text-slate-500 text-xs space-y-1">
+        <div className="text-slate-500 text-xs space-y-1 mb-5">
           {cliente.data_nascimento && <p>Nascimento: {cliente.data_nascimento}</p>}
           {cliente.email && <p>Email: {cliente.email}</p>}
           {cliente.telefone && <p>Tel: {cliente.telefone}</p>}
@@ -147,6 +164,38 @@ function ClienteModal({ cliente, onClose }) {
           {cliente.poder_aquisitivo && <p>Poder aquisitivo: {cliente.poder_aquisitivo}</p>}
           {cliente.criado_em && <p>Importado: {new Date(cliente.criado_em).toLocaleString("pt-BR")}</p>}
         </div>
+
+        {/* Botões de decisão */}
+        <div className="flex gap-3">
+          <button
+            onClick={() => onDecidir(cliente.cpf, "APROVADO")}
+            className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${
+              cliente.decisao === "APROVADO"
+                ? "bg-emerald-600 text-white ring-2 ring-emerald-400"
+                : "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white"
+            }`}
+          >
+            ✅ Usar este cliente
+          </button>
+          <button
+            onClick={() => onDecidir(cliente.cpf, "RECUSADO")}
+            className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${
+              cliente.decisao === "RECUSADO"
+                ? "bg-red-600 text-white ring-2 ring-red-400"
+                : "bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white"
+            }`}
+          >
+            ❌ Não usar
+          </button>
+        </div>
+        {cliente.decisao && (
+          <button
+            onClick={() => onDecidir(cliente.cpf, null)}
+            className="w-full mt-2 py-2 rounded-lg text-slate-500 text-xs hover:text-white hover:bg-slate-700/50 transition-colors"
+          >
+            Desfazer decisão
+          </button>
+        )}
       </div>
     </div>
   );
@@ -180,6 +229,7 @@ export default function Home() {
   const [progresso, setProgresso] = useState("");
   const [clienteSelecionado, setClienteSelecionado] = useState(null);
   const [ordenacao, setOrdenacao] = useState({ campo: null, dir: "desc" });
+  const [abaAtiva, setAbaAtiva] = useState("simulacoes"); // "simulacoes" | "docs"
   const fileInputRef = useRef(null);
   const resultFileRef = useRef(null);
 
@@ -196,6 +246,28 @@ export default function Home() {
 
     if (!error && data) setSimulacoes(data);
     setLoading(false);
+  }
+
+  // DECIDIR (aprovar/recusar)
+  async function handleDecidir(cpf, decisao) {
+    const updateData = {
+      decisao: decisao,
+      decidido_em: decisao ? new Date().toISOString() : null,
+    };
+
+    const { error } = await supabase
+      .from("simulacoes")
+      .update(updateData)
+      .eq("cpf", cpf);
+
+    if (!error) {
+      // Atualizar local
+      setSimulacoes((prev) =>
+        prev.map((s) => s.cpf === cpf ? { ...s, ...updateData } : s)
+      );
+      // Atualizar modal
+      setClienteSelecionado((prev) => prev ? { ...prev, ...updateData } : null);
+    }
   }
 
   // IMPORTAR TXT
@@ -224,7 +296,7 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // CONSULTAR API (pendentes) - 1 por 1 com atualização em tempo real
+  // CONSULTAR API
   async function handleConsultar() {
     const pendentes = simulacoes.filter((s) => s.status === "PENDENTE");
     if (pendentes.length === 0) {
@@ -248,9 +320,8 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ cpfs: [item.cpf] }),
         });
-        const result = await resp.json();
+        await resp.json();
 
-        // Atualiza o item localmente na tabela em tempo real
         setSimulacoes((prev) =>
           prev.map((s) =>
             s.cpf === item.cpf
@@ -269,7 +340,7 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // EXPORTAR CPFs consultados (para rodar no Python)
+  // EXPORTAR
   async function handleExportar() {
     setProgresso("Exportando...");
     const resp = await fetch("/api/exportar");
@@ -293,7 +364,7 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // IMPORTAR RESULTADO do Python
+  // IMPORTAR RESULTADO
   async function handleImportarResultado(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -332,6 +403,10 @@ export default function Home() {
   // UFs únicas
   const ufsDisponiveis = [...new Set(simulacoes.map((s) => s.uf).filter(Boolean))].sort();
 
+  // Docs usados
+  const docsAprovados = simulacoes.filter((s) => s.decisao === "APROVADO");
+  const docsRecusados = simulacoes.filter((s) => s.decisao === "RECUSADO");
+
   // FILTROS + ORDENAÇÃO
   let filtradas = simulacoes.filter((s) => {
     const matchStatus = filtroStatus === "TODOS" || s.status === filtroStatus;
@@ -344,7 +419,6 @@ export default function Home() {
     return matchStatus && matchClass && matchUF && matchBusca;
   });
 
-  // Ordenação
   if (ordenacao.campo) {
     filtradas = [...filtradas].sort((a, b) => {
       let va, vb;
@@ -373,10 +447,61 @@ export default function Home() {
     bloqueado: simulacoes.filter((s) => s.classificacao === "BLOQUEADO").length,
   };
 
+  // Tabela de docs reutilizável
+  function DocsTable({ items, titulo, emptyMsg }) {
+    return (
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-700/50">
+          <h3 className="text-white font-medium">{titulo} ({items.length})</h3>
+        </div>
+        {items.length === 0 ? (
+          <div className="text-center py-8 text-slate-500 text-sm">{emptyMsg}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700/50">
+                  <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">Nome</th>
+                  <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">CPF</th>
+                  <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">UF</th>
+                  <th className="text-right px-3 py-2 text-slate-400 font-medium text-xs">Score</th>
+                  <th className="text-right px-3 py-2 text-slate-400 font-medium text-xs">Renda</th>
+                  <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">Class.</th>
+                  <th className="text-right px-3 py-2 text-slate-400 font-medium text-xs">Entrada</th>
+                  <th className="text-right px-3 py-2 text-slate-400 font-medium text-xs">Parcela</th>
+                  <th className="text-right px-3 py-2 text-slate-400 font-medium text-xs">Decidido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((s) => (
+                  <tr key={s.id} className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer" onClick={() => setClienteSelecionado(s)}>
+                    <td className="px-3 py-2 text-white font-medium text-xs">{s.nome || "—"}</td>
+                    <td className="px-3 py-2 text-slate-300 font-mono text-[10px]">{formatCPF(s.cpf)}</td>
+                    <td className="px-3 py-2 text-slate-300 text-xs">{s.uf || "—"}</td>
+                    <td className="px-3 py-2 text-right"><ScoreBadge score={s.score} /></td>
+                    <td className="px-3 py-2 text-right text-slate-300 text-xs">{formatRenda(s.renda)}</td>
+                    <td className="px-3 py-2">{s.classificacao ? <Badge type="class" value={s.classificacao} /> : "—"}</td>
+                    <td className="px-3 py-2 text-right text-slate-300 text-xs">{s.entrada_valor != null ? `${s.entrada_percentual}%` : "—"}</td>
+                    <td className="px-3 py-2 text-right text-slate-300 text-xs">{s.parcela_valor ? formatCurrency(s.parcela_valor) : "—"}</td>
+                    <td className="px-3 py-2 text-right text-slate-500 text-[10px]">{s.decidido_em ? new Date(s.decidido_em).toLocaleString("pt-BR") : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <main className="max-w-[1400px] mx-auto px-4 py-8">
       {/* Modal */}
-      <ClienteModal cliente={clienteSelecionado} onClose={() => setClienteSelecionado(null)} />
+      <ClienteModal
+        cliente={clienteSelecionado}
+        onClose={() => setClienteSelecionado(null)}
+        onDecidir={handleDecidir}
+      />
 
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
@@ -389,151 +514,196 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Ações */}
-      <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 mb-6">
-        <h2 className="text-white font-semibold mb-4">Ações</h2>
-        <div className="flex flex-wrap gap-3">
-          <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
-            📄 Importar TXT
-            <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={handleImportTxt} disabled={importando} />
-          </label>
-          <button
-            onClick={handleConsultar}
-            disabled={consultando || stats.pendente === 0}
-            className="px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
-          >
-            {consultando ? "⏳ Consultando..." : `🔍 Consultar API (${stats.pendente})`}
-          </button>
-          <button
-            onClick={handleExportar}
-            disabled={stats.consultado === 0}
-            className="px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
-          >
-            📥 Exportar CPFs ({stats.consultado})
-          </button>
-          <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
-            📊 Importar Resultado
-            <input ref={resultFileRef} type="file" accept=".json" className="hidden" onChange={handleImportarResultado} disabled={importandoResultado} />
-          </label>
-        </div>
-        {progresso && (
-          <div className="mt-3 px-3 py-2 bg-slate-900/50 rounded-lg text-sm text-slate-300">{progresso}</div>
-        )}
-        <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
-          <span>📄 TXT</span><span>→</span><span>⏳ Pendente</span><span>→</span><span>🔍 API</span><span>→</span><span>📥 Exportar</span><span>→</span><span>🐍 Python</span><span>→</span><span>📊 Resultado</span><span>→</span><span>✅ Concluído</span>
-        </div>
+      {/* Abas */}
+      <div className="flex gap-1 mb-6 bg-slate-800/50 border border-slate-700/50 rounded-xl p-1">
+        <button
+          onClick={() => setAbaAtiva("simulacoes")}
+          className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            abaAtiva === "simulacoes" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700/50"
+          }`}
+        >
+          📊 Simulações ({stats.total})
+        </button>
+        <button
+          onClick={() => setAbaAtiva("docs")}
+          className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            abaAtiva === "docs" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700/50"
+          }`}
+        >
+          📋 Docs Usados ({docsAprovados.length + docsRecusados.length})
+        </button>
       </div>
 
-      {/* Stats por Status */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <StatCard title="Total" value={stats.total} icon="📊" onClick={() => { setFiltroStatus("TODOS"); setFiltroClass("TODOS"); }} active={filtroStatus === "TODOS" && filtroClass === "TODOS"} />
-        <StatCard title="Pendentes" value={stats.pendente} icon="⏳" onClick={() => { setFiltroStatus("PENDENTE"); setFiltroClass("TODOS"); }} active={filtroStatus === "PENDENTE"} />
-        <StatCard title="Consultados" value={stats.consultado} icon="🔍" onClick={() => { setFiltroStatus("CONSULTADO"); setFiltroClass("TODOS"); }} active={filtroStatus === "CONSULTADO"} />
-        <StatCard title="Concluídos" value={stats.concluido} icon="✅" onClick={() => { setFiltroStatus("CONCLUIDO"); setFiltroClass("TODOS"); }} active={filtroStatus === "CONCLUIDO"} />
-      </div>
+      {/* ===== ABA SIMULAÇÕES ===== */}
+      {abaAtiva === "simulacoes" && (
+        <>
+          {/* Ações */}
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 mb-6">
+            <h2 className="text-white font-semibold mb-4">Ações</h2>
+            <div className="flex flex-wrap gap-3">
+              <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
+                📄 Importar TXT
+                <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={handleImportTxt} disabled={importando} />
+              </label>
+              <button
+                onClick={handleConsultar}
+                disabled={consultando || stats.pendente === 0}
+                className="px-4 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                {consultando ? "⏳ Consultando..." : `🔍 Consultar API (${stats.pendente})`}
+              </button>
+              <button
+                onClick={handleExportar}
+                disabled={stats.consultado === 0}
+                className="px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                📥 Exportar CPFs ({stats.consultado})
+              </button>
+              <label className="cursor-pointer px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors flex items-center gap-2">
+                📊 Importar Resultado
+                <input ref={resultFileRef} type="file" accept=".json" className="hidden" onChange={handleImportarResultado} disabled={importandoResultado} />
+              </label>
+            </div>
+            {progresso && (
+              <div className="mt-3 px-3 py-2 bg-slate-900/50 rounded-lg text-sm text-slate-300">{progresso}</div>
+            )}
+            <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
+              <span>📄 TXT</span><span>→</span><span>⏳ Pendente</span><span>→</span><span>🔍 API</span><span>→</span><span>📥 Exportar</span><span>→</span><span>🐍 Python</span><span>→</span><span>📊 Resultado</span><span>→</span><span>✅ Concluído</span>
+            </div>
+          </div>
 
-      {stats.concluido > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <StatCard title="Ótimo (0-10%)" value={stats.otimo} icon="🟢" onClick={() => { setFiltroClass("OTIMO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "OTIMO"} />
-          <StatCard title="Bom (10-20%)" value={stats.bom} icon="🟡" onClick={() => { setFiltroClass("BOM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BOM"} />
-          <StatCard title="Ruim (20%+)" value={stats.ruim} icon="🔴" onClick={() => { setFiltroClass("RUIM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "RUIM"} />
-          <StatCard title="Bloqueado" value={stats.bloqueado} icon="⚫" onClick={() => { setFiltroClass("BLOQUEADO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BLOQUEADO"} />
-        </div>
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <StatCard title="Total" value={stats.total} icon="📊" onClick={() => { setFiltroStatus("TODOS"); setFiltroClass("TODOS"); }} active={filtroStatus === "TODOS" && filtroClass === "TODOS"} />
+            <StatCard title="Pendentes" value={stats.pendente} icon="⏳" onClick={() => { setFiltroStatus("PENDENTE"); setFiltroClass("TODOS"); }} active={filtroStatus === "PENDENTE"} />
+            <StatCard title="Consultados" value={stats.consultado} icon="🔍" onClick={() => { setFiltroStatus("CONSULTADO"); setFiltroClass("TODOS"); }} active={filtroStatus === "CONSULTADO"} />
+            <StatCard title="Concluídos" value={stats.concluido} icon="✅" onClick={() => { setFiltroStatus("CONCLUIDO"); setFiltroClass("TODOS"); }} active={filtroStatus === "CONCLUIDO"} />
+          </div>
+
+          {stats.concluido > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <StatCard title="Ótimo (0-10%)" value={stats.otimo} icon="🟢" onClick={() => { setFiltroClass("OTIMO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "OTIMO"} />
+              <StatCard title="Bom (10-20%)" value={stats.bom} icon="🟡" onClick={() => { setFiltroClass("BOM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BOM"} />
+              <StatCard title="Ruim (20%+)" value={stats.ruim} icon="🔴" onClick={() => { setFiltroClass("RUIM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "RUIM"} />
+              <StatCard title="Bloqueado" value={stats.bloqueado} icon="⚫" onClick={() => { setFiltroClass("BLOQUEADO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BLOQUEADO"} />
+            </div>
+          )}
+
+          {/* Busca + UF */}
+          <div className="mb-6 flex gap-3">
+            <input
+              type="text"
+              placeholder="Buscar por nome ou CPF..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="flex-1 bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            />
+            <select
+              value={filtroUF}
+              onChange={(e) => setFiltroUF(e.target.value)}
+              className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="TODOS">Todas UFs</option>
+              {ufsDisponiveis.map((uf) => (
+                <option key={uf} value={uf}>{uf}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tabela */}
+          {loading ? (
+            <div className="text-center py-12 text-slate-400">Carregando...</div>
+          ) : filtradas.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-slate-400 text-lg">Nenhuma simulação encontrada</p>
+              <p className="text-slate-500 text-sm mt-2">Importe um arquivo TXT para começar</p>
+            </div>
+          ) : (
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700/50">
+                      <SortHeader label="Nome" campo="nome" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
+                      <th className="text-left px-3 py-3 text-slate-400 font-medium">CPF</th>
+                      <th className="text-left px-3 py-3 text-slate-400 font-medium">UF</th>
+                      <SortHeader label="Score" campo="score" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                      <SortHeader label="Renda" campo="renda" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                      <th className="text-left px-3 py-3 text-slate-400 font-medium">Status</th>
+                      <SortHeader label="Class." campo="classificacao" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
+                      <SortHeader label="Pré-Aprov." campo="pre_aprovado" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                      <SortHeader label="Entrada" campo="entrada" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                      <SortHeader label="Parcela" campo="parcela" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                      <th className="text-center px-3 py-3 text-slate-400 font-medium">Decisão</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtradas.map((s) => (
+                      <tr
+                        key={s.id}
+                        className={`border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer ${
+                          s.decisao === "APROVADO" ? "bg-emerald-500/5" : s.decisao === "RECUSADO" ? "bg-red-500/5" : ""
+                        }`}
+                        onClick={() => setClienteSelecionado(s)}
+                      >
+                        <td className="px-3 py-3 text-white font-medium">{s.nome || "—"}</td>
+                        <td className="px-3 py-3 text-slate-300 font-mono text-xs">{formatCPF(s.cpf)}</td>
+                        <td className="px-3 py-3 text-slate-300">{s.uf || "—"}</td>
+                        <td className="px-3 py-3 text-right"><ScoreBadge score={s.score} /></td>
+                        <td className="px-3 py-3 text-right text-slate-300 text-xs">{formatRenda(s.renda)}</td>
+                        <td className="px-3 py-3"><Badge type="status" value={s.status} /></td>
+                        <td className="px-3 py-3">{s.classificacao ? <Badge type="class" value={s.classificacao} /> : <span className="text-slate-600">—</span>}</td>
+                        <td className="px-3 py-3 text-right">
+                          {s.pre_aprovado_valor > 0 ? (
+                            <div>
+                              <div className="text-emerald-400 font-medium text-xs">{formatCurrency(s.pre_aprovado_valor)}</div>
+                              <div className="text-slate-500 text-[10px]">{s.pre_aprovado_entrada_min}% / {s.pre_aprovado_prazo_max}m</div>
+                            </div>
+                          ) : <span className="text-slate-600">—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-right text-slate-300">
+                          {s.entrada_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
+                            <div>
+                              <div className="text-xs">{formatCurrency(s.entrada_valor)}</div>
+                              <div className="text-[10px] text-slate-500">{s.entrada_percentual}%</div>
+                            </div>
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right text-slate-300">
+                          {s.parcela_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
+                            <div>
+                              <div className="text-xs">{formatCurrency(s.parcela_valor)}</div>
+                              <div className="text-[10px] text-slate-500">{s.parcela_qtd}x</div>
+                            </div>
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-center"><DecisaoBadge decisao={s.decisao} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-4 py-3 border-t border-slate-700/50 text-slate-500 text-xs">
+                {filtradas.length} resultado(s)
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Busca + Filtro UF */}
-      <div className="mb-6 flex gap-3">
-        <input
-          type="text"
-          placeholder="Buscar por nome ou CPF..."
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          className="flex-1 bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
-        <select
-          value={filtroUF}
-          onChange={(e) => setFiltroUF(e.target.value)}
-          className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="TODOS">Todas UFs</option>
-          {ufsDisponiveis.map((uf) => (
-            <option key={uf} value={uf}>{uf}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Tabela */}
-      {loading ? (
-        <div className="text-center py-12 text-slate-400">Carregando...</div>
-      ) : filtradas.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-slate-400 text-lg">Nenhuma simulação encontrada</p>
-          <p className="text-slate-500 text-sm mt-2">Importe um arquivo TXT para começar</p>
-        </div>
-      ) : (
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-700/50">
-                  <SortHeader label="Nome" campo="nome" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
-                  <th className="text-left px-3 py-3 text-slate-400 font-medium">CPF</th>
-                  <th className="text-left px-3 py-3 text-slate-400 font-medium">UF</th>
-                  <SortHeader label="Score" campo="score" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                  <SortHeader label="Renda" campo="renda" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Status</th>
-                  <SortHeader label="Class." campo="classificacao" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
-                  <SortHeader label="Pré-Aprov." campo="pre_aprovado" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                  <SortHeader label="Entrada" campo="entrada" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                  <SortHeader label="Parcela" campo="parcela" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtradas.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
-                    onClick={() => setClienteSelecionado(s)}
-                  >
-                    <td className="px-3 py-3 text-white font-medium">{s.nome || "—"}</td>
-                    <td className="px-3 py-3 text-slate-300 font-mono text-xs">{formatCPF(s.cpf)}</td>
-                    <td className="px-3 py-3 text-slate-300">{s.uf || "—"}</td>
-                    <td className="px-3 py-3 text-right"><ScoreBadge score={s.score} /></td>
-                    <td className="px-3 py-3 text-right text-slate-300 text-xs">{formatRenda(s.renda)}</td>
-                    <td className="px-3 py-3"><Badge type="status" value={s.status} /></td>
-                    <td className="px-3 py-3">{s.classificacao ? <Badge type="class" value={s.classificacao} /> : <span className="text-slate-600">—</span>}</td>
-                    <td className="px-3 py-3 text-right">
-                      {s.pre_aprovado_valor > 0 ? (
-                        <div>
-                          <div className="text-emerald-400 font-medium text-xs">{formatCurrency(s.pre_aprovado_valor)}</div>
-                          <div className="text-slate-500 text-[10px]">{s.pre_aprovado_entrada_min}% / {s.pre_aprovado_prazo_max}m</div>
-                        </div>
-                      ) : <span className="text-slate-600">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right text-slate-300">
-                      {s.entrada_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
-                        <div>
-                          <div className="text-xs">{formatCurrency(s.entrada_valor)}</div>
-                          <div className="text-[10px] text-slate-500">{s.entrada_percentual}%</div>
-                        </div>
-                      ) : "—"}
-                    </td>
-                    <td className="px-3 py-3 text-right text-slate-300">
-                      {s.parcela_valor != null && s.status === "CONCLUIDO" && s.classificacao !== "BLOQUEADO" ? (
-                        <div>
-                          <div className="text-xs">{formatCurrency(s.parcela_valor)}</div>
-                          <div className="text-[10px] text-slate-500">{s.parcela_qtd}x</div>
-                        </div>
-                      ) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-4 py-3 border-t border-slate-700/50 text-slate-500 text-xs">
-            {filtradas.length} resultado(s)
-          </div>
+      {/* ===== ABA DOCS USADOS ===== */}
+      {abaAtiva === "docs" && (
+        <div className="space-y-6">
+          <DocsTable
+            items={docsAprovados}
+            titulo="✅ Aprovados para Usar"
+            emptyMsg="Nenhum cliente aprovado ainda. Clique em um cliente na aba Simulações e escolha 'Usar este cliente'."
+          />
+          <DocsTable
+            items={docsRecusados}
+            titulo="❌ Recusados"
+            emptyMsg="Nenhum cliente recusado ainda."
+          />
         </div>
       )}
     </main>
