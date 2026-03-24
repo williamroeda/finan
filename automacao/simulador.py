@@ -1,6 +1,7 @@
 """
 Simulador Santander Financiamentos - Automação com Playwright
 Seletores reais do site do Santander (Março 2026)
+VERSÃO RÁPIDA - tempos otimizados
 """
 
 import asyncio
@@ -20,7 +21,6 @@ VEICULO = {
 
 SITE_URL = "https://www.cliente.santanderfinanciamentos.com.br/originacaocliente/?ori=SF&int_source=menu-simule-ja#/dados-pessoais"
 
-# Mapa UF sigla -> nome completo (para o select do site)
 UF_NOME = {
     "AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas",
     "BA": "Bahia", "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo",
@@ -45,45 +45,37 @@ def gerar_email(nome: str) -> str:
 
 
 def formatar_telefone(tel: str) -> str:
-    """Garante que o telefone tenha 11 dígitos (DDD + 9 + 8 dígitos)."""
     num = re.sub(r"\D", "", tel)
     if not num:
-        return "11999999999"  # fallback
-    # Se tem 10 dígitos, adiciona 9 após o DDD
+        return "11999999999"
     if len(num) == 10:
         num = num[:2] + "9" + num[2:]
-    # Se tem menos de 10, gera um válido com o DDD
     if len(num) < 10:
         ddd = num[:2] if len(num) >= 2 else "11"
         num = ddd + "9" + "9" * 8
-    # Se tem mais de 11, corta
     if len(num) > 11:
         num = num[:11]
     return num
 
 
 async def preencher_combobox(page, index, texto):
-    """Preenche um ng-select combobox pelo índice na página."""
-    # Clica no ng-select para abrir
+    """Preenche um ng-select combobox - VERSÃO RÁPIDA."""
     ng_selects = page.locator("ng-select")
     await ng_selects.nth(index).click()
-    await page.wait_for_timeout(500)
+    await page.wait_for_timeout(200)
 
-    # Digita no input do combobox
     input_combo = ng_selects.nth(index).locator("input[role='combobox']")
     await input_combo.fill("")
-    await input_combo.type(texto, delay=50)
-    await page.wait_for_timeout(1500)
+    await input_combo.type(texto, delay=20)
+    await page.wait_for_timeout(800)
 
-    # Clica na primeira opção do dropdown
     dropdown_option = page.locator("div.ng-option").first
     if await dropdown_option.is_visible():
         await dropdown_option.click()
     else:
-        # Tenta via texto parcial
         await page.locator(f"div.ng-option:has-text('{texto[:20]}')").first.click()
 
-    await page.wait_for_timeout(1000)
+    await page.wait_for_timeout(500)
 
 
 async def simular_financiamento(page, cliente: dict) -> dict:
@@ -92,104 +84,95 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         # 1. Abrir site
         print(f"  [1/8] Abrindo site...")
         await page.goto(SITE_URL, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(5000)
+        # Esperar o botão Pessoa Física aparecer em vez de tempo fixo
+        await page.locator("button.btn-person").wait_for(state="visible", timeout=15000)
+        await page.wait_for_timeout(500)
 
-        # 2. Clicar em Pessoa Física
+        # 2. Pessoa Física
         print(f"  [2/8] Clicando em Pessoa Física...")
         await page.locator("button.btn-person").click()
-        await page.wait_for_timeout(2000)
+        await page.locator('input[formcontrolname="dateOfBirth"]').wait_for(state="visible", timeout=5000)
+        await page.wait_for_timeout(300)
 
-        # 3. Preencher dados pessoais
+        # 3. Dados pessoais
         print(f"  [3/8] Preenchendo dados pessoais...")
 
-        # Data de nascimento (formato DD/MM/AAAA)
         nascimento = cliente.get("data_nascimento", "")
         input_nascimento = page.locator('input[formcontrolname="dateOfBirth"]')
         await input_nascimento.click()
-        await input_nascimento.type(nascimento, delay=50)
-        await page.wait_for_timeout(500)
+        await input_nascimento.type(nascimento, delay=20)
 
-        # CPF
         cpf = cliente["cpf"]
         input_cpf = page.locator('input[formcontrolname="cpf"]')
         await input_cpf.click()
-        await input_cpf.type(cpf, delay=30)
-        await page.wait_for_timeout(500)
+        await input_cpf.type(cpf, delay=15)
 
-        # Email
         email = cliente.get("email") or gerar_email(cliente.get("nome", ""))
         input_email = page.locator('input[formcontrolname="email"]')
         await input_email.click()
-        await input_email.type(email, delay=30)
-        await page.wait_for_timeout(500)
+        await input_email.type(email, delay=15)
 
-        # Celular (garantir 11 dígitos)
         telefone = formatar_telefone(cliente.get("telefone", ""))
         input_cel = page.locator('input[formcontrolname="cellNumber"]')
         await input_cel.click()
-        await input_cel.type(telefone, delay=30)
-        await page.wait_for_timeout(500)
+        await input_cel.type(telefone, delay=15)
+        await page.wait_for_timeout(200)
 
-        # CNH = Sim (se existir)
+        # CNH = Sim
         try:
             cnh_sim = page.locator("text=Sim").first
-            if await cnh_sim.is_visible(timeout=2000):
+            if await cnh_sim.is_visible(timeout=1000):
                 await cnh_sim.click()
-                await page.wait_for_timeout(500)
         except:
             pass
 
-        # 4. Clicar em "Quero simular"
+        # 4. Quero simular
         print(f"  [4/8] Clicando em Quero simular...")
         await page.locator("button.btn-simulate").click()
-        await page.wait_for_timeout(4000)
+        # Esperar a próxima tela carregar
+        await page.locator("button.btn-vehicle").wait_for(state="visible", timeout=15000)
+        await page.wait_for_timeout(500)
 
-        # Inicializar pré-aprovado
+        # Pré-aprovado
         pre_aprovado = ""
         pre_aprovado_valor = 0.0
         pre_aprovado_entrada_min = 0
         pre_aprovado_prazo_max = 0
 
-        # 5. Clicar em "Carro"
+        # 5. Carro
         print(f"  [5/8] Escolhendo Carro...")
         await page.locator("button.btn-vehicle").click()
-        await page.wait_for_timeout(3000)
+        await page.locator("button.btn-c2c-financing").wait_for(state="visible", timeout=10000)
+        await page.wait_for_timeout(300)
 
-        # 6. Clicar em "Você e o dono" (C2C)
+        # 6. Você e o dono
         print(f"  [6/8] Clicando em 'Você e o dono'...")
         await page.locator("button.btn-c2c-financing").click()
-        await page.wait_for_timeout(3000)
+        # Esperar formulário de veículo carregar
+        await page.locator("ng-select").first.wait_for(state="visible", timeout=10000)
+        await page.wait_for_timeout(500)
 
-        # 6.5 Capturar Pré-Aprovado (aparece na tela de detalhes do veículo)
-        await page.wait_for_timeout(2000)
+        # 6.5 Capturar Pré-Aprovado
         try:
-            # Tentar múltiplos seletores
             advice_el = page.locator("p.advice").first
-            if not await advice_el.is_visible(timeout=2000):
-                advice_el = page.locator("div.advice, .pre-approved, .pre-aprovado, [class*='advice']").first
-
-            if await advice_el.is_visible(timeout=3000):
+            if await advice_el.is_visible(timeout=1500):
                 pre_aprovado = await advice_el.inner_text()
                 pre_aprovado = pre_aprovado.replace("\xa0", " ").strip()
                 print(f"  [PRÉ-APROVADO] {pre_aprovado}")
 
-                # Extrair valor pré-aprovado (ex: "R$ 150.000,00")
                 valor_match = re.search(r"R\$\s*([\d.,]+)", pre_aprovado)
                 if valor_match:
                     v = valor_match.group(1).replace(".", "").replace(",", ".")
                     pre_aprovado_valor = float(v)
 
-                # Extrair entrada mínima (ex: "30%")
                 entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", pre_aprovado)
                 if entrada_match:
                     pre_aprovado_entrada_min = int(entrada_match.group(1))
 
-                # Extrair prazo máximo (ex: "48 meses")
                 prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", pre_aprovado)
                 if prazo_match:
                     pre_aprovado_prazo_max = int(prazo_match.group(1))
             else:
-                # Tenta capturar qualquer texto que contenha "Pré Aprovado" na página
                 body_text = await page.inner_text("body")
                 pre_match = re.search(r"R\$\s*([\d.,]+)\s*Pr[ée]\s*Aprovado", body_text, re.IGNORECASE)
                 if pre_match:
@@ -207,80 +190,72 @@ async def simular_financiamento(page, cliente: dict) -> dict:
                 else:
                     print(f"  [INFO] Sem pré-aprovado detectado")
         except Exception as e:
-            print(f"  [INFO] Erro ao capturar pré-aprovado: {e}")
+            print(f"  [INFO] Erro pré-aprovado: {e}")
 
-        # 7. Preencher detalhes do veículo
+        # 7. Veículo
         print(f"  [7/8] Preenchendo veículo...")
 
-        # Marca (1º combobox - index 0)
         await preencher_combobox(page, 0, VEICULO["marca"])
         print(f"    Marca: {VEICULO['marca']}")
 
-        # Ano/modelo (2º combobox - index 1)
         await preencher_combobox(page, 1, VEICULO["ano"])
         print(f"    Ano: {VEICULO['ano']}")
 
-        # Modelo (3º combobox - index 2)
         await preencher_combobox(page, 2, VEICULO["modelo"][:15])
         print(f"    Modelo: {VEICULO['modelo']}")
 
-        # UF (4º combobox - index 3)
         uf_sigla = cliente.get("uf", "SP")
         uf_nome = UF_NOME.get(uf_sigla, "São Paulo")
         await preencher_combobox(page, 3, uf_nome)
         print(f"    UF: {uf_nome}")
 
-        # Valor do veículo (campo com máscara monetária - digitar centavos)
+        # Valor
         input_valor = page.locator("input#valor-veiculo")
         await input_valor.click()
-        await input_valor.fill("")
-        # Limpar campo completamente
         await input_valor.press("Control+a")
         await input_valor.press("Backspace")
+        await input_valor.type("20000000", delay=15)
         await page.wait_for_timeout(300)
-        # Digitar 20000000 = R$ 200.000,00 (valor em centavos)
-        await input_valor.type("20000000", delay=30)
-        await page.wait_for_timeout(1000)
         print(f"    Valor: R$ 200.000,00")
 
-        # 8. Clicar em "Ver simulação"
+        # 8. Ver simulação
         print(f"  [8/8] Clicando em Ver simulação...")
         btn_simular = page.locator("button.btn-simulate")
-        # Esperar botão ficar habilitado
         await btn_simular.wait_for(state="visible", timeout=5000)
-        await page.wait_for_timeout(1000)
 
-        # Verificar se está disabled
         is_disabled = await btn_simular.get_attribute("disabled")
         if is_disabled is not None:
-            print(f"  [AVISO] Botão ainda desabilitado, aguardando...")
-            await page.wait_for_timeout(3000)
+            print(f"  [AVISO] Botão desabilitado, aguardando...")
+            await page.wait_for_timeout(2000)
 
         await btn_simular.click()
-        await page.wait_for_timeout(8000)
 
-        # 9. Coletar resultados
+        # Esperar resultado carregar (espera o elemento de parcela aparecer)
+        try:
+            await page.locator("#installmentValue").wait_for(state="visible", timeout=15000)
+            await page.wait_for_timeout(1000)
+        except:
+            await page.wait_for_timeout(5000)
+
+        # 9. Resultados
         print(f"  [RESULT] Coletando resultados...")
 
-        # Entrada em % (ex: "30%")
         entrada_pct = 0.0
         try:
             entrada_el = page.locator("strong").first
-            entrada_text = await entrada_el.inner_text(timeout=10000)
+            entrada_text = await entrada_el.inner_text(timeout=5000)
             entrada_match = re.search(r"(\d+)", entrada_text)
             if entrada_match:
                 entrada_pct = float(entrada_match.group(1))
         except:
             pass
 
-        # Valor da entrada
         entrada_valor = (entrada_pct / 100) * 200000
 
-        # Valor da parcela (ex: "R$ 4.196,39")
         parcela_valor = 0.0
         try:
             parcela_el = page.locator("#installmentValue")
-            parcela_text = await parcela_el.inner_text(timeout=5000)
+            parcela_text = await parcela_el.inner_text(timeout=3000)
             parcela_match = re.search(r"[\d.,]+", parcela_text.replace("R$", "").replace("\xa0", ""))
             if parcela_match:
                 parcela_str = parcela_match.group(0).replace(".", "").replace(",", ".")
@@ -288,18 +263,15 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         except:
             pass
 
-        # Quantidade de parcelas - tentar vários métodos
         parcela_qtd = 0
         try:
             page_text = await page.inner_text("body")
-            # Tentar "48x", "48 x", "48 vezes", "48 meses", "48 parcelas"
             qtd_match = re.search(r"(\d+)\s*(?:x|X|vezes|parcelas|meses)", page_text)
             if qtd_match:
                 parcela_qtd = int(qtd_match.group(1))
             else:
-                # Tentar pegar do combobox de parcelas (valor selecionado)
                 combo_el = page.locator("ng-select .ng-value-label, .ng-value span").first
-                if await combo_el.is_visible(timeout=2000):
+                if await combo_el.is_visible(timeout=1000):
                     combo_text = await combo_el.inner_text()
                     qtd_combo = re.search(r"(\d+)", combo_text)
                     if qtd_combo:
@@ -307,25 +279,19 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         except:
             pass
 
-        # Se ainda 0, default 48 (prazo padrão do Santander)
         if parcela_qtd == 0 and parcela_valor > 0:
             parcela_qtd = 48
 
-        # Se não achou entrada, pode ser bloqueado
         if entrada_pct == 0 and parcela_valor == 0:
-            # Tenta ver se tem mensagem de erro
             page_text = await page.inner_text("body")
             if "não foi possível" in page_text.lower() or "tente novamente" in page_text.lower() or "indisponível" in page_text.lower():
-                print(f"  [RESULT] BLOQUEADO - simulação não passou")
-                await page.screenshot(path=f"bloqueado_{cliente['cpf']}.png")
+                print(f"  [RESULT] BLOQUEADO")
                 return {"cpf": cliente["cpf"], "bloqueado": True}
 
         print(f"  [RESULT] Entrada: {entrada_pct}% = R$ {entrada_valor:,.2f}")
         print(f"  [RESULT] Parcela: R$ {parcela_valor:,.2f} x {parcela_qtd}")
         if pre_aprovado_valor > 0:
-            print(f"  [RESULT] Pré-aprovado: R$ {pre_aprovado_valor:,.2f} | Entrada mín: {pre_aprovado_entrada_min}% | Prazo máx: {pre_aprovado_prazo_max} meses")
-
-        await page.screenshot(path=f"resultado_{cliente['cpf']}.png")
+            print(f"  [RESULT] Pré-aprovado: R$ {pre_aprovado_valor:,.2f} | Entrada mín: {pre_aprovado_entrada_min}% | Prazo máx: {pre_aprovado_prazo_max}m")
 
         return {
             "cpf": cliente["cpf"],
@@ -354,13 +320,12 @@ async def main():
     parser.add_argument("--arquivo", type=str, required=True, help="JSON exportado do dashboard")
     parser.add_argument("--saida", type=str, default="resultado_simulacao.json", help="Arquivo de saída")
     parser.add_argument("--headless", action="store_true", help="Rodar sem abrir o navegador")
-    parser.add_argument("--inicio", type=int, default=0, help="Índice inicial (para continuar de onde parou)")
+    parser.add_argument("--inicio", type=int, default=0, help="Índice inicial")
     args = parser.parse_args()
 
     with open(args.arquivo, "r", encoding="utf-8") as f:
         clientes = json.load(f)
 
-    # Carregar resultados anteriores se existirem
     resultados = []
     try:
         with open(args.saida, "r", encoding="utf-8") as f:
@@ -369,7 +334,6 @@ async def main():
     except:
         pass
 
-    # Pular CPFs já processados
     cpfs_ja_feitos = {r["cpf"] for r in resultados}
     clientes_pendentes = [c for c in clientes if c["cpf"] not in cpfs_ja_feitos]
     print(f"Total no arquivo: {len(clientes)}")
@@ -404,16 +368,14 @@ async def main():
             resultado = await simular_financiamento(page, cliente)
             resultados.append(resultado)
 
-            # Salvar parcial a cada cliente (para não perder progresso)
             with open(args.saida, "w", encoding="utf-8") as f:
                 json.dump(resultados, f, ensure_ascii=False, indent=2)
 
             await context.close()
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
         await browser.close()
 
-    # Resumo
     aprovados = [r for r in resultados if not r.get("bloqueado")]
     bloqueados = [r for r in resultados if r.get("bloqueado")]
     print(f"\n{'='*60}")

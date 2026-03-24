@@ -152,10 +152,26 @@ function ClienteModal({ cliente, onClose }) {
   );
 }
 
+const CLASS_ORDER = { OTIMO: 1, BOM: 2, RUIM: 3, BLOQUEADO: 4 };
+
+function SortHeader({ label, campo, ordenacao, setOrdenacao, align }) {
+  const ativo = ordenacao.campo === campo;
+  const dir = ativo ? ordenacao.dir : null;
+  return (
+    <th
+      className={`${align === "right" ? "text-right" : "text-left"} px-3 py-3 text-slate-400 font-medium cursor-pointer hover:text-white select-none transition-colors`}
+      onClick={() => setOrdenacao({ campo, dir: ativo && dir === "desc" ? "asc" : "desc" })}
+    >
+      {label} {ativo ? (dir === "desc" ? "▼" : "▲") : ""}
+    </th>
+  );
+}
+
 export default function Home() {
   const [simulacoes, setSimulacoes] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState("TODOS");
   const [filtroClass, setFiltroClass] = useState("TODOS");
+  const [filtroUF, setFiltroUF] = useState("TODOS");
   const [busca, setBusca] = useState("");
   const [loading, setLoading] = useState(true);
   const [importando, setImportando] = useState(false);
@@ -163,6 +179,7 @@ export default function Home() {
   const [importandoResultado, setImportandoResultado] = useState(false);
   const [progresso, setProgresso] = useState("");
   const [clienteSelecionado, setClienteSelecionado] = useState(null);
+  const [ordenacao, setOrdenacao] = useState({ campo: null, dir: "desc" });
   const fileInputRef = useRef(null);
   const resultFileRef = useRef(null);
 
@@ -312,16 +329,38 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // FILTROS
-  const filtradas = simulacoes.filter((s) => {
+  // UFs únicas
+  const ufsDisponiveis = [...new Set(simulacoes.map((s) => s.uf).filter(Boolean))].sort();
+
+  // FILTROS + ORDENAÇÃO
+  let filtradas = simulacoes.filter((s) => {
     const matchStatus = filtroStatus === "TODOS" || s.status === filtroStatus;
     const matchClass = filtroClass === "TODOS" || s.classificacao === filtroClass;
+    const matchUF = filtroUF === "TODOS" || s.uf === filtroUF;
     const matchBusca =
       !busca ||
       s.nome?.toLowerCase().includes(busca.toLowerCase()) ||
       s.cpf?.includes(busca);
-    return matchStatus && matchClass && matchBusca;
+    return matchStatus && matchClass && matchUF && matchBusca;
   });
+
+  // Ordenação
+  if (ordenacao.campo) {
+    filtradas = [...filtradas].sort((a, b) => {
+      let va, vb;
+      switch (ordenacao.campo) {
+        case "score": va = a.score || 0; vb = b.score || 0; break;
+        case "renda": va = a.renda || 0; vb = b.renda || 0; break;
+        case "pre_aprovado": va = a.pre_aprovado_valor || 0; vb = b.pre_aprovado_valor || 0; break;
+        case "classificacao": va = CLASS_ORDER[a.classificacao] || 99; vb = CLASS_ORDER[b.classificacao] || 99; break;
+        case "entrada": va = a.entrada_percentual || 0; vb = b.entrada_percentual || 0; break;
+        case "parcela": va = a.parcela_valor || 0; vb = b.parcela_valor || 0; break;
+        case "nome": va = a.nome || ""; vb = b.nome || ""; return ordenacao.dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb);
+        default: va = 0; vb = 0;
+      }
+      return ordenacao.dir === "desc" ? vb - va : va - vb;
+    });
+  }
 
   const stats = {
     total: simulacoes.length,
@@ -402,15 +441,25 @@ export default function Home() {
         </div>
       )}
 
-      {/* Busca */}
-      <div className="mb-6">
+      {/* Busca + Filtro UF */}
+      <div className="mb-6 flex gap-3">
         <input
           type="text"
           placeholder="Buscar por nome ou CPF..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
         />
+        <select
+          value={filtroUF}
+          onChange={(e) => setFiltroUF(e.target.value)}
+          className="bg-slate-800/50 border border-slate-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-blue-500"
+        >
+          <option value="TODOS">Todas UFs</option>
+          {ufsDisponiveis.map((uf) => (
+            <option key={uf} value={uf}>{uf}</option>
+          ))}
+        </select>
       </div>
 
       {/* Tabela */}
@@ -427,16 +476,16 @@ export default function Home() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700/50">
-                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Nome</th>
+                  <SortHeader label="Nome" campo="nome" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
                   <th className="text-left px-3 py-3 text-slate-400 font-medium">CPF</th>
                   <th className="text-left px-3 py-3 text-slate-400 font-medium">UF</th>
-                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Score</th>
-                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Renda</th>
+                  <SortHeader label="Score" campo="score" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                  <SortHeader label="Renda" campo="renda" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
                   <th className="text-left px-3 py-3 text-slate-400 font-medium">Status</th>
-                  <th className="text-left px-3 py-3 text-slate-400 font-medium">Class.</th>
-                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Pré-Aprov.</th>
-                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Entrada</th>
-                  <th className="text-right px-3 py-3 text-slate-400 font-medium">Parcela</th>
+                  <SortHeader label="Class." campo="classificacao" ordenacao={ordenacao} setOrdenacao={setOrdenacao} />
+                  <SortHeader label="Pré-Aprov." campo="pre_aprovado" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                  <SortHeader label="Entrada" campo="entrada" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
+                  <SortHeader label="Parcela" campo="parcela" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
                 </tr>
               </thead>
               <tbody>
