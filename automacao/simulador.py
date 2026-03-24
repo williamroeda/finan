@@ -144,13 +144,30 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         await page.locator("button.btn-simulate").click()
         await page.wait_for_timeout(4000)
 
-        # 4.5 Capturar Pré-Aprovado (se existir)
+        # Inicializar pré-aprovado
         pre_aprovado = ""
         pre_aprovado_valor = 0.0
         pre_aprovado_entrada_min = 0
         pre_aprovado_prazo_max = 0
+
+        # 5. Clicar em "Carro"
+        print(f"  [5/8] Escolhendo Carro...")
+        await page.locator("button.btn-vehicle").click()
+        await page.wait_for_timeout(3000)
+
+        # 6. Clicar em "Você e o dono" (C2C)
+        print(f"  [6/8] Clicando em 'Você e o dono'...")
+        await page.locator("button.btn-c2c-financing").click()
+        await page.wait_for_timeout(3000)
+
+        # 6.5 Capturar Pré-Aprovado (aparece na tela de detalhes do veículo)
+        await page.wait_for_timeout(2000)
         try:
-            advice_el = page.locator("p.advice")
+            # Tentar múltiplos seletores
+            advice_el = page.locator("p.advice").first
+            if not await advice_el.is_visible(timeout=2000):
+                advice_el = page.locator("div.advice, .pre-approved, .pre-aprovado, [class*='advice']").first
+
             if await advice_el.is_visible(timeout=3000):
                 pre_aprovado = await advice_el.inner_text()
                 pre_aprovado = pre_aprovado.replace("\xa0", " ").strip()
@@ -171,18 +188,26 @@ async def simular_financiamento(page, cliente: dict) -> dict:
                 prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", pre_aprovado)
                 if prazo_match:
                     pre_aprovado_prazo_max = int(prazo_match.group(1))
-        except:
-            pass
+            else:
+                # Tenta capturar qualquer texto que contenha "Pré Aprovado" na página
+                body_text = await page.inner_text("body")
+                pre_match = re.search(r"R\$\s*([\d.,]+)\s*Pr[ée]\s*Aprovado", body_text, re.IGNORECASE)
+                if pre_match:
+                    v = pre_match.group(1).replace(".", "").replace(",", ".")
+                    pre_aprovado_valor = float(v)
+                    pre_aprovado = pre_match.group(0)
+                    print(f"  [PRÉ-APROVADO via texto] {pre_aprovado}")
 
-        # 5. Clicar em "Carro"
-        print(f"  [5/8] Escolhendo Carro...")
-        await page.locator("button.btn-vehicle").click()
-        await page.wait_for_timeout(3000)
-
-        # 6. Clicar em "Você e o dono" (C2C)
-        print(f"  [6/8] Clicando em 'Você e o dono'...")
-        await page.locator("button.btn-c2c-financing").click()
-        await page.wait_for_timeout(3000)
+                    entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", body_text)
+                    if entrada_match:
+                        pre_aprovado_entrada_min = int(entrada_match.group(1))
+                    prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", body_text)
+                    if prazo_match:
+                        pre_aprovado_prazo_max = int(prazo_match.group(1))
+                else:
+                    print(f"  [INFO] Sem pré-aprovado detectado")
+        except Exception as e:
+            print(f"  [INFO] Erro ao capturar pré-aprovado: {e}")
 
         # 7. Preencher detalhes do veículo
         print(f"  [7/8] Preenchendo veículo...")
@@ -263,15 +288,28 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         except:
             pass
 
-        # Quantidade de parcelas
+        # Quantidade de parcelas - tentar vários métodos
         parcela_qtd = 0
         try:
             page_text = await page.inner_text("body")
+            # Tentar "48x", "48 x", "48 vezes", "48 meses", "48 parcelas"
             qtd_match = re.search(r"(\d+)\s*(?:x|X|vezes|parcelas|meses)", page_text)
             if qtd_match:
                 parcela_qtd = int(qtd_match.group(1))
+            else:
+                # Tentar pegar do combobox de parcelas (valor selecionado)
+                combo_el = page.locator("ng-select .ng-value-label, .ng-value span").first
+                if await combo_el.is_visible(timeout=2000):
+                    combo_text = await combo_el.inner_text()
+                    qtd_combo = re.search(r"(\d+)", combo_text)
+                    if qtd_combo:
+                        parcela_qtd = int(qtd_combo.group(1))
         except:
             pass
+
+        # Se ainda 0, default 48 (prazo padrão do Santander)
+        if parcela_qtd == 0 and parcela_valor > 0:
+            parcela_qtd = 48
 
         # Se não achou entrada, pode ser bloqueado
         if entrada_pct == 0 and parcela_valor == 0:
