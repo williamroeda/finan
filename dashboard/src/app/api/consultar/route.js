@@ -41,7 +41,6 @@ export async function POST(request) {
       };
 
       try {
-        // Chamar API
         const resp = await fetch(
           `${apiUrl}?token=${apiToken}&modulo=cpf&consulta=${cpf}`,
           { signal: AbortSignal.timeout(30000) }
@@ -53,45 +52,50 @@ export async function POST(request) {
 
         const dados = await resp.json();
 
-        // DadosBasicos
-        const basicos = dados?.DadosBasicos || dados?.dadosBasicos || {};
-        const nome = basicos?.Nome || basicos?.nome || "";
-        const dataNascimento = basicos?.DataNascimento || basicos?.dataNascimento || "";
+        // DadosBasicos (chaves minúsculas na API)
+        const basicos = dados?.DadosBasicos || {};
+        const nome = basicos?.nome || basicos?.Nome || "";
+        const dataNascimento = basicos?.dataNascimento || basicos?.DataNascimento || "";
 
         // DadosEconomicos
-        const economicos = dados?.DadosEconomicos || dados?.dadosEconomicos || {};
+        const economicos = dados?.DadosEconomicos || {};
 
-        // Renda
+        // Renda - campo direto "renda"
         let renda = 0;
-        const rendaRaw = economicos?.Renda || economicos?.renda || economicos?.RendaPresumida || "";
+        const rendaRaw = economicos?.renda || economicos?.Renda || "";
         if (rendaRaw) {
           const rendaStr = String(rendaRaw).replace(/[R$\s]/g, "").replace(/\./g, "").replace(",", ".");
           renda = parseFloat(rendaStr) || 0;
         }
 
-        const poderAquisitivo = economicos?.PoderAquisitivo || economicos?.poderAquisitivo || "";
-
-        // Score
+        // Score - é um OBJETO: { scoreCSB: "789", scoreCSBFaixaRisco: "...", scoreCSBA: "..." }
         let score = 0;
-        const scoreVal = economicos?.Score || economicos?.score ||
-          economicos?.ScoreCredito || economicos?.scoreCredito ||
-          economicos?.ScoreSerasa || dados?.Score || 0;
-        if (typeof scoreVal === "object") {
-          score = parseInt(scoreVal?.Valor || scoreVal?.valor || scoreVal?.Score || 0) || 0;
+        const scoreObj = economicos?.score || economicos?.Score || {};
+        if (typeof scoreObj === "object" && scoreObj !== null) {
+          score = parseInt(scoreObj?.scoreCSB || scoreObj?.scoreCSBA || scoreObj?.Valor || scoreObj?.valor || 0) || 0;
         } else {
-          score = parseInt(scoreVal) || 0;
+          score = parseInt(scoreObj) || 0;
         }
 
-        // Telefones
-        const telefones = dados?.Telefones || dados?.telefones || [];
+        // Poder Aquisitivo - é um OBJETO: { poderAquisitivoDescricao: "MUITO ALTO", ... }
+        let poderAquisitivo = "";
+        const paObj = economicos?.poderAquisitivo || economicos?.PoderAquisitivo || {};
+        if (typeof paObj === "object" && paObj !== null) {
+          poderAquisitivo = paObj?.poderAquisitivoDescricao || paObj?.faixaPoderAquisitivo || "";
+        } else {
+          poderAquisitivo = String(paObj) || "";
+        }
+
+        // Telefones - campo é "telefone" (não "Numero"/"DDD")
+        const telefones = dados?.telefones || dados?.Telefones || [];
         let telefone = "";
         if (Array.isArray(telefones) && telefones.length > 0) {
           for (const tel of telefones) {
-            const num = tel?.Numero || tel?.numero || "";
-            const ddd = tel?.DDD || tel?.ddd || "";
-            if (num) {
-              telefone = ddd ? `${ddd}${num}`.replace(/\D/g, "") : String(num).replace(/\D/g, "");
-              if (telefone.length >= 10) break;
+            // Campo "telefone" contém o número completo com DDD
+            const num = String(tel?.telefone || tel?.Telefone || tel?.numero || tel?.Numero || "").replace(/\D/g, "");
+            if (num.length >= 10) {
+              telefone = num;
+              break;
             }
           }
         }
@@ -108,14 +112,13 @@ export async function POST(request) {
         if (score > 0) updateData.score = score;
         if (poderAquisitivo) updateData.poder_aquisitivo = poderAquisitivo;
 
-        resultados.push({ cpf, status: "ok", nome, renda, score });
+        resultados.push({ cpf, status: "ok", nome, renda, score, poder: poderAquisitivo });
       } catch (e) {
-        // Mesmo com erro na API, marcar como CONSULTADO
         updateData.telefone = gerarTelefone();
         resultados.push({ cpf, status: "erro_api", erro: e.message });
       }
 
-      // SEMPRE salvar no banco, independente de erro
+      // SEMPRE salvar no banco
       const { error: dbError } = await supabase
         .from("simulacoes")
         .update(updateData)
