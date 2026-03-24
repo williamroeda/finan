@@ -400,15 +400,16 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // UFs únicas
-  const ufsDisponiveis = [...new Set(simulacoes.map((s) => s.uf).filter(Boolean))].sort();
-
-  // Docs usados
+  // Separar: sem decisão (aba principal) vs com decisão (docs usados)
+  const semDecisao = simulacoes.filter((s) => !s.decisao);
   const docsAprovados = simulacoes.filter((s) => s.decisao === "APROVADO");
   const docsRecusados = simulacoes.filter((s) => s.decisao === "RECUSADO");
 
-  // FILTROS + ORDENAÇÃO
-  let filtradas = simulacoes.filter((s) => {
+  // UFs únicas (de todos)
+  const ufsDisponiveis = [...new Set(simulacoes.map((s) => s.uf).filter(Boolean))].sort();
+
+  // FILTROS + ORDENAÇÃO (só os sem decisão)
+  let filtradas = semDecisao.filter((s) => {
     const matchStatus = filtroStatus === "TODOS" || s.status === filtroStatus;
     const matchClass = filtroClass === "TODOS" || s.classificacao === filtroClass;
     const matchUF = filtroUF === "TODOS" || s.uf === filtroUF;
@@ -437,14 +438,14 @@ export default function Home() {
   }
 
   const stats = {
-    total: simulacoes.length,
-    pendente: simulacoes.filter((s) => s.status === "PENDENTE").length,
-    consultado: simulacoes.filter((s) => s.status === "CONSULTADO").length,
-    concluido: simulacoes.filter((s) => s.status === "CONCLUIDO").length,
-    otimo: simulacoes.filter((s) => s.classificacao === "OTIMO").length,
-    bom: simulacoes.filter((s) => s.classificacao === "BOM").length,
-    ruim: simulacoes.filter((s) => s.classificacao === "RUIM").length,
-    bloqueado: simulacoes.filter((s) => s.classificacao === "BLOQUEADO").length,
+    total: semDecisao.length,
+    pendente: semDecisao.filter((s) => s.status === "PENDENTE").length,
+    consultado: semDecisao.filter((s) => s.status === "CONSULTADO").length,
+    concluido: semDecisao.filter((s) => s.status === "CONCLUIDO").length,
+    otimo: semDecisao.filter((s) => s.classificacao === "OTIMO").length,
+    bom: semDecisao.filter((s) => s.classificacao === "BOM").length,
+    ruim: semDecisao.filter((s) => s.classificacao === "RUIM").length,
+    bloqueado: semDecisao.filter((s) => s.classificacao === "BLOQUEADO").length,
   };
 
   // Tabela de docs reutilizável
@@ -522,7 +523,7 @@ export default function Home() {
             abaAtiva === "simulacoes" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700/50"
           }`}
         >
-          📊 Simulações ({stats.total})
+          📊 Simulações ({semDecisao.length})
         </button>
         <button
           onClick={() => setAbaAtiva("docs")}
@@ -530,7 +531,7 @@ export default function Home() {
             abaAtiva === "docs" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-700/50"
           }`}
         >
-          📋 Docs Usados ({docsAprovados.length + docsRecusados.length})
+          📋 Docs Usados (✅ {docsAprovados.length} | ❌ {docsRecusados.length})
         </button>
       </div>
 
@@ -634,16 +635,13 @@ export default function Home() {
                       <SortHeader label="Pré-Aprov." campo="pre_aprovado" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
                       <SortHeader label="Entrada" campo="entrada" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
                       <SortHeader label="Parcela" campo="parcela" ordenacao={ordenacao} setOrdenacao={setOrdenacao} align="right" />
-                      <th className="text-center px-3 py-3 text-slate-400 font-medium">Decisão</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtradas.map((s) => (
                       <tr
                         key={s.id}
-                        className={`border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer ${
-                          s.decisao === "APROVADO" ? "bg-emerald-500/5" : s.decisao === "RECUSADO" ? "bg-red-500/5" : ""
-                        }`}
+                        className="border-b border-slate-700/30 hover:bg-slate-700/20 cursor-pointer"
                         onClick={() => setClienteSelecionado(s)}
                       >
                         <td className="px-3 py-3 text-white font-medium">{s.nome || "—"}</td>
@@ -677,7 +675,6 @@ export default function Home() {
                             </div>
                           ) : "—"}
                         </td>
-                        <td className="px-3 py-3 text-center"><DecisaoBadge decisao={s.decisao} /></td>
                       </tr>
                     ))}
                   </tbody>

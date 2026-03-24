@@ -139,11 +139,67 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         pre_aprovado_entrada_min = 0
         pre_aprovado_prazo_max = 0
 
+        # Função para capturar pré-aprovado em qualquer tela
+        async def capturar_pre_aprovado():
+            nonlocal pre_aprovado, pre_aprovado_valor, pre_aprovado_entrada_min, pre_aprovado_prazo_max
+            if pre_aprovado_valor > 0:
+                return  # Já capturou
+            try:
+                # Tentar múltiplos seletores
+                for seletor in ["p.advice", ".advice", "[class*='advice']", ".pre-approved", ".alert-success", ".info-box"]:
+                    el = page.locator(seletor).first
+                    if await el.is_visible(timeout=500):
+                        texto = await el.inner_text()
+                        texto = texto.replace("\xa0", " ").strip()
+                        if "Pr" in texto and "Aprovado" in texto:
+                            pre_aprovado = texto
+                            break
+
+                # Se não achou por seletor, busca no body
+                if not pre_aprovado:
+                    body_text = await page.inner_text("body")
+                    # Procurar "Pré Aprovado" ou "Pré-Aprovado"
+                    pre_match = re.search(r"(Voc[êe]\s+tem\s+R\$\s*[\d.,]+.*?(?:cr[ée]dito|an[áa]lise)\.?)", body_text, re.IGNORECASE | re.DOTALL)
+                    if pre_match:
+                        pre_aprovado = pre_match.group(1).strip()
+                    elif "Pré Aprovado" in body_text or "Pré-Aprovado" in body_text:
+                        pre_match2 = re.search(r"R\$\s*[\d.,]+.*?Pr[ée].?Aprovad", body_text, re.IGNORECASE)
+                        if pre_match2:
+                            # Pegar contexto ao redor
+                            start = max(0, pre_match2.start() - 20)
+                            end = min(len(body_text), pre_match2.end() + 200)
+                            pre_aprovado = body_text[start:end].strip()
+
+                if pre_aprovado:
+                    print(f"  [PRÉ-APROVADO] {pre_aprovado[:120]}...")
+
+                    valor_match = re.search(r"R\$\s*([\d.,]+)", pre_aprovado)
+                    if valor_match:
+                        v = valor_match.group(1).replace(".", "").replace(",", ".")
+                        pre_aprovado_valor = float(v)
+
+                    entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", pre_aprovado)
+                    if entrada_match:
+                        pre_aprovado_entrada_min = int(entrada_match.group(1))
+
+                    prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", pre_aprovado)
+                    if prazo_match:
+                        pre_aprovado_prazo_max = int(prazo_match.group(1))
+
+                    print(f"  [PRÉ-APROVADO] Valor: R$ {pre_aprovado_valor:,.2f} | Entrada mín: {pre_aprovado_entrada_min}% | Prazo máx: {pre_aprovado_prazo_max}m")
+                else:
+                    print(f"  [INFO] Sem pré-aprovado detectado")
+            except Exception as e:
+                print(f"  [INFO] Erro pré-aprovado: {e}")
+
         # 5. Carro
         print(f"  [5/8] Escolhendo Carro...")
         await page.locator("button.btn-vehicle").click()
         await page.locator("button.btn-c2c-financing").wait_for(state="visible", timeout=10000)
         await page.wait_for_timeout(300)
+
+        # Tentar capturar pré-aprovado AQUI (tela do tipo de veículo)
+        await capturar_pre_aprovado()
 
         # 6. Você e o dono
         print(f"  [6/8] Clicando em 'Você e o dono'...")
@@ -152,45 +208,8 @@ async def simular_financiamento(page, cliente: dict) -> dict:
         await page.locator("ng-select").first.wait_for(state="visible", timeout=10000)
         await page.wait_for_timeout(500)
 
-        # 6.5 Capturar Pré-Aprovado
-        try:
-            advice_el = page.locator("p.advice").first
-            if await advice_el.is_visible(timeout=1500):
-                pre_aprovado = await advice_el.inner_text()
-                pre_aprovado = pre_aprovado.replace("\xa0", " ").strip()
-                print(f"  [PRÉ-APROVADO] {pre_aprovado}")
-
-                valor_match = re.search(r"R\$\s*([\d.,]+)", pre_aprovado)
-                if valor_match:
-                    v = valor_match.group(1).replace(".", "").replace(",", ".")
-                    pre_aprovado_valor = float(v)
-
-                entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", pre_aprovado)
-                if entrada_match:
-                    pre_aprovado_entrada_min = int(entrada_match.group(1))
-
-                prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", pre_aprovado)
-                if prazo_match:
-                    pre_aprovado_prazo_max = int(prazo_match.group(1))
-            else:
-                body_text = await page.inner_text("body")
-                pre_match = re.search(r"R\$\s*([\d.,]+)\s*Pr[ée]\s*Aprovado", body_text, re.IGNORECASE)
-                if pre_match:
-                    v = pre_match.group(1).replace(".", "").replace(",", ".")
-                    pre_aprovado_valor = float(v)
-                    pre_aprovado = pre_match.group(0)
-                    print(f"  [PRÉ-APROVADO via texto] {pre_aprovado}")
-
-                    entrada_match = re.search(r"[Ee]ntrada\s+m[ií]nima\s+de\s+(\d+)%", body_text)
-                    if entrada_match:
-                        pre_aprovado_entrada_min = int(entrada_match.group(1))
-                    prazo_match = re.search(r"[Pp]razo\s+m[áa]ximo\s+de\s+(\d+)", body_text)
-                    if prazo_match:
-                        pre_aprovado_prazo_max = int(prazo_match.group(1))
-                else:
-                    print(f"  [INFO] Sem pré-aprovado detectado")
-        except Exception as e:
-            print(f"  [INFO] Erro pré-aprovado: {e}")
+        # Tentar capturar pré-aprovado AQUI também (tela de detalhes)
+        await capturar_pre_aprovado()
 
         # 7. Veículo
         print(f"  [7/8] Preenchendo veículo...")
