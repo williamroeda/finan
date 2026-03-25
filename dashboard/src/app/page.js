@@ -583,9 +583,9 @@ export default function Home() {
 
           {stats.concluido > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatCard title="Ótimo (0-10%)" value={stats.otimo} icon="🟢" onClick={() => { setFiltroClass("OTIMO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "OTIMO"} />
-              <StatCard title="Bom (10-20%)" value={stats.bom} icon="🟡" onClick={() => { setFiltroClass("BOM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BOM"} />
-              <StatCard title="Ruim (20%+)" value={stats.ruim} icon="🔴" onClick={() => { setFiltroClass("RUIM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "RUIM"} />
+              <StatCard title="Ótimo (0%+900+20k)" value={stats.otimo} icon="🟢" onClick={() => { setFiltroClass("OTIMO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "OTIMO"} />
+              <StatCard title="Bom (0%+800+10k)" value={stats.bom} icon="🟡" onClick={() => { setFiltroClass("BOM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BOM"} />
+              <StatCard title="Ruim (resto)" value={stats.ruim} icon="🔴" onClick={() => { setFiltroClass("RUIM"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "RUIM"} />
               <StatCard title="Bloqueado" value={stats.bloqueado} icon="⚫" onClick={() => { setFiltroClass("BLOQUEADO"); setFiltroStatus("CONCLUIDO"); }} active={filtroClass === "BLOQUEADO"} />
             </div>
           )}

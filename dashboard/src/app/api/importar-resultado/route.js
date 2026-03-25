@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase-server";
 
-function classificar(entradaPct) {
-  if (entradaPct == null) return "BLOQUEADO";
-  if (entradaPct <= 10) return "OTIMO";
-  if (entradaPct <= 20) return "BOM";
+function classificar(entradaPct, score, renda) {
+  if (entradaPct === 0 && score >= 900 && renda >= 20000) return "OTIMO";
+  if (entradaPct === 0 && score >= 800 && renda >= 10000) return "BOM";
   return "RUIM";
 }
 
@@ -20,40 +19,44 @@ export async function POST(request) {
       const cpf = r.cpf?.replace(/\D/g, "");
       if (!cpf) continue;
 
+      // Buscar score e renda do banco para classificar
+      const { data: registro } = await supabase
+        .from("simulacoes")
+        .select("score, renda")
+        .eq("cpf", cpf)
+        .single();
+
+      const score = registro?.score || 0;
+      const renda = registro?.renda || 0;
+
       if (r.bloqueado) {
         const updateBloq = {
           status: "CONCLUIDO",
           classificacao: "BLOQUEADO",
           concluido_em: new Date().toISOString(),
         };
-        // Mesmo bloqueado pode ter pré-aprovado
         if (r.pre_aprovado_valor) updateBloq.pre_aprovado_valor = parseFloat(r.pre_aprovado_valor);
         if (r.pre_aprovado_entrada_min) updateBloq.pre_aprovado_entrada_min = parseInt(r.pre_aprovado_entrada_min);
         if (r.pre_aprovado_prazo_max) updateBloq.pre_aprovado_prazo_max = parseInt(r.pre_aprovado_prazo_max);
         if (r.pre_aprovado_texto) updateBloq.pre_aprovado_texto = r.pre_aprovado_texto;
 
-        await supabase
-          .from("simulacoes")
-          .update(updateBloq)
-          .eq("cpf", cpf);
+        await supabase.from("simulacoes").update(updateBloq).eq("cpf", cpf);
         bloqueados++;
       } else {
         let entradaPct = parseFloat(r.entrada_percentual) || 0;
         let entradaValor = parseFloat(r.entrada_valor) || 0;
 
-        // Se a simulação retornou 0% mas o pré-aprovado tem entrada mínima, usar o pré-aprovado
         const preAprovEntradaMin = parseInt(r.pre_aprovado_entrada_min) || 0;
         if (entradaPct === 0 && preAprovEntradaMin > 0) {
           entradaPct = preAprovEntradaMin;
           entradaValor = (preAprovEntradaMin / 100) * 200000;
         }
 
-        // Se tem valor mas não tem %, calcular
         if (entradaPct === 0 && entradaValor > 0) {
           entradaPct = (entradaValor / 200000) * 100;
         }
 
-        const classificacao = classificar(entradaPct);
+        const classificacao = classificar(entradaPct, score, renda);
 
         const updateData = {
           status: "CONCLUIDO",
@@ -65,16 +68,12 @@ export async function POST(request) {
           concluido_em: new Date().toISOString(),
         };
 
-        // Pré-aprovado
         if (r.pre_aprovado_valor) updateData.pre_aprovado_valor = parseFloat(r.pre_aprovado_valor);
         if (r.pre_aprovado_entrada_min) updateData.pre_aprovado_entrada_min = parseInt(r.pre_aprovado_entrada_min);
         if (r.pre_aprovado_prazo_max) updateData.pre_aprovado_prazo_max = parseInt(r.pre_aprovado_prazo_max);
         if (r.pre_aprovado_texto) updateData.pre_aprovado_texto = r.pre_aprovado_texto;
 
-        await supabase
-          .from("simulacoes")
-          .update(updateData)
-          .eq("cpf", cpf);
+        await supabase.from("simulacoes").update(updateData).eq("cpf", cpf);
         atualizados++;
       }
     }
