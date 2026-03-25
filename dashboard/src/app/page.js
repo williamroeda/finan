@@ -340,19 +340,27 @@ export default function Home() {
     setTimeout(() => setProgresso(""), 5000);
   }
 
-  // EXPORTAR
-  async function handleExportar() {
-    setProgresso("Exportando...");
-    const resp = await fetch("/api/exportar");
-    const data = await resp.json();
+  // EXPORTAR — usa os dados já carregados no app, sem chamar o servidor
+  function handleExportar() {
+    const consultados = simulacoes.filter((s) => s.status === "CONSULTADO");
 
-    if (data.error || data.length === 0) {
-      setProgresso(data.error || "Nenhum CPF consultado para exportar");
+    if (consultados.length === 0) {
+      setProgresso("Nenhum CPF consultado para exportar");
       setTimeout(() => setProgresso(""), 3000);
       return;
     }
 
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const exportData = consultados.map((r) => ({
+      cpf: r.cpf,
+      nome: r.nome,
+      data_nascimento: r.data_nascimento,
+      telefone: r.telefone || "",
+      email: r.email || "",
+      uf: r.uf,
+      cidade_uf: r.cidade_uf,
+    }));
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -360,7 +368,7 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
 
-    setProgresso(`${data.length} CPFs exportados!`);
+    setProgresso(`${exportData.length} CPFs exportados!`);
     setTimeout(() => setProgresso(""), 5000);
   }
 
